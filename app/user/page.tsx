@@ -15,7 +15,8 @@ import {
   Search,
   CheckCircle2,
   PlusCircle,
-  X
+  X,
+  Loader2
 } from 'lucide-react'
 
 export default function UserPortalPage() {
@@ -24,6 +25,7 @@ export default function UserPortalPage() {
 
   const [currentUser, setCurrentUser] = useState<any>(null)
   const [userRole, setUserRole] = useState<string>('user')
+  const [isAuthChecking, setIsAuthChecking] = useState(true)
   const [loading, setLoading] = useState(true)
   const [myAssets, setMyAssets] = useState<Asset[]>([])
   const [searchTerm, setSearchTerm] = useState('')
@@ -53,12 +55,9 @@ export default function UserPortalPage() {
       const { data: { user }, error: authError } = await supabase.auth.getUser()
 
       if (authError || !user) {
-        // Fallback for demo when testing locally without active session
-        setCurrentUser({
-          email: 'user@company.com',
-          user_metadata: { full_name: 'Nguyễn Văn Thành', role: 'user', department: 'Phòng IT' }
-        })
-        setUserRole('user')
+        // Redirect to login if user is not authenticated
+        router.push('/auth/login')
+        return
       } else {
         let role = user.user_metadata?.role || 'user'
         let fullName = user.user_metadata?.full_name || ''
@@ -127,10 +126,12 @@ export default function UserPortalPage() {
       }
     } catch (err) {
       console.error('Error in user portal:', err)
+      router.push('/auth/login')
     } finally {
       setLoading(false)
+      setIsAuthChecking(false)
     }
-  }, [supabase])
+  }, [router, supabase])
 
   useEffect(() => {
     checkAuthAndFetchAssets()
@@ -182,6 +183,20 @@ export default function UserPortalPage() {
       <span>Đề xuất cấp phát</span>
     </button>
   )
+
+  if (isAuthChecking) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center space-y-4">
+        <div className="w-12 h-12 rounded-2xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 animate-pulse shadow-lg shadow-blue-500/10">
+          <Loader2 className="w-6 h-6 animate-spin" />
+        </div>
+        <div className="text-center space-y-1">
+          <p className="text-sm font-bold text-white">Đang xác thực thông tin tài khoản...</p>
+          <p className="text-xs text-slate-400">Vui lòng chờ trong giây lát</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <AppLayout

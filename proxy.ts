@@ -1,53 +1,80 @@
-// import { createServerClient } from '@supabase/ssr'
-// import { NextResponse, type NextRequest } from 'next/server'
+import { createServerClient } from '@supabase/ssr'
+import { NextResponse, type NextRequest } from 'next/server'
 
-// export async function middleware(request: NextRequest) {
-//   let response = NextResponse.next({
-//     request: {
-//       headers: request.headers,
-//     },
-//   })
+export async function proxy(request: NextRequest) {
+  let response = NextResponse.next({
+    request: {
+      headers: request.headers,
+    },
+  })
 
-//   const supabase = createServerClient(
-//     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-//     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-//     {
-//       cookies: {
-//         getAll() {
-//           return request.cookies.getAll()
-//         },
-//         setAll(cookiesToSet) {
-//           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
-//           response = NextResponse.next({
-//             request,
-//           })
-//           cookiesToSet.forEach(({ name, value, options }) =>
-//             response.cookies.set(name, value, options)
-//           )
-//         },
-//       },
-//     }
-//   )
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
-//   await supabase.auth.getUser()
+  // Bỏ qua nếu chưa cấu hình Supabase
+  if (!url || !key || url.includes('placeholder')) {
+    return response
+  }
 
-//   return response
-// }
+  const supabase = createServerClient(
+    url,
+    key,
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll()
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
+          response = NextResponse.next({
+            request,
+          })
+          cookiesToSet.forEach(({ name, value, options }) =>
+            response.cookies.set(name, value, options)
+          )
+        },
+      },
+    }
+  )
 
-// export const config = {
-//   matcher: [
-//     '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
-//   ],
-// }
+  const { data: { user } } = await supabase.auth.getUser()
+  const pathname = request.nextUrl.pathname
 
-import { NextResponse } from 'next/server'
-import type { NextRequest } from 'next/server'
- 
-// This function can be marked `async` if using `await` inside
-export function proxy(request: NextRequest) {
-  return NextResponse.redirect(new URL('/home', request.url))
+  // 1. Bảo vệ toàn bộ trang Admin (/admin)
+  if (pathname.startsWith('/admin')) {
+    if (!user) {
+      const loginUrl = new URL('/auth/login', request.url)
+      loginUrl.searchParams.set('next', pathname)
+      return NextResponse.redirect(loginUrl)
+    }
+  }
+
+  // 2. Bảo vệ toàn bộ trang User (/user)
+  if (pathname.startsWith('/user')) {
+    if (!user) {
+      const loginUrl = new URL('/auth/login', request.url)
+      loginUrl.searchParams.set('next', pathname)
+      return NextResponse.redirect(loginUrl)
+    }
+  }
+
+  // 3. Nếu đã đăng nhập mà vào lại /auth/login hoặc /auth/register -> tự động chuyển hướng vào app
+  if (pathname === '/auth/login' || pathname === '/auth/register') {
+    if (user) {
+      const role = user.user_metadata?.role || 'user'
+      const destination = role === 'admin' ? '/admin' : '/user'
+      return NextResponse.redirect(new URL(destination, request.url))
+    }
+  }
+
+  return response
 }
- 
+
 export const config = {
-  matcher: '/about/:path*',
+  matcher: [
+    '/admin/:path*',
+    '/user/:path*',
+    '/auth/login',
+    '/auth/register',
+  ],
 }

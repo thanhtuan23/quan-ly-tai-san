@@ -34,35 +34,18 @@ export default function RegisterPage() {
 
   const supabase = createClient()
 
-  const isSupabaseConfigured = () => {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-    return (url.startsWith('http://') || url.startsWith('https://')) && !url.includes('your_supabase_project_url')
-  }
-
   // Google OAuth Register / Login
   const handleGoogleSignup = async () => {
     setLoading(true)
     setMessage(null)
     try {
-      if (isSupabaseConfigured()) {
-        const { error } = await supabase.auth.signInWithOAuth({
-          provider: 'google',
-          options: {
-            redirectTo: `${window.location.origin}/admin`
-          }
-        })
-        if (error) throw error
-      } else {
-        setTimeout(() => {
-          setMessage({
-            type: 'info',
-            text: 'Đang đăng ký nhanh với Google Demo... (Chưa cấu hình Supabase URL thực tế)'
-          })
-          setTimeout(() => {
-            router.push('/admin')
-          }, 1200)
-        }, 800)
-      }
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/admin`
+        }
+      })
+      if (error) throw error
     } catch (err: any) {
       setMessage({
         type: 'error',
@@ -103,32 +86,21 @@ export default function RegisterPage() {
     }
 
     try {
-      if (isSupabaseConfigured()) {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: {
-              full_name: fullName,
-              role: 'user'
-            }
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            full_name: fullName,
+            role: 'user'
           }
-        })
-        if (error) throw error
-        setMessage({
-          type: 'success',
-          text: 'Đăng ký tài khoản thành công! Vui lòng kiểm tra email để kích hoạt.'
-        })
-      } else {
-        // Demo Fallback
-        setTimeout(() => {
-          setMessage({
-            type: 'success',
-            text: 'Tạo tài khoản Demo thành công! Đang chuyển hướng vào hệ thống...'
-          })
-          setTimeout(() => router.push('/admin'), 1200)
-        }, 800)
-      }
+        }
+      })
+      if (error) throw error
+      setMessage({
+        type: 'success',
+        text: 'Đăng ký tài khoản thành công! Vui lòng kiểm tra email để kích hoạt tài khoản của bạn.'
+      })
     } catch (err: any) {
       setMessage({
         type: 'error',

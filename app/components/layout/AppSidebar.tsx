@@ -121,7 +121,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
               <div className="min-w-0 transition-opacity duration-200">
                 <div className="flex items-center gap-2">
                   <span className="font-extrabold text-base tracking-wide bg-gradient-to-r from-white via-slate-100 to-slate-300 bg-clip-text text-transparent truncate">
-                    QLTS Pro
+                    Trang chủ
                   </span>
                   <span
                     className={`text-[9px] px-1.5 py-0.5 rounded font-bold border uppercase tracking-wider ${

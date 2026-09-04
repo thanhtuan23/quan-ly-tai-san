@@ -34,8 +34,9 @@ export default function AdminPage() {
   const router = useRouter()
   const supabase = createClient()
 
-  // Authenticated Admin User
+  // Authenticated Admin User & Auth Checking State
   const [adminUser, setAdminUser] = useState<{ full_name?: string; email?: string; role?: 'admin' | 'user' } | null>(null)
+  const [isAuthChecking, setIsAuthChecking] = useState(true)
 
   // Active View Tab Switcher ('assets' | 'users')
   const [activeView, setActiveView] = useState<'assets' | 'users'>('assets')
@@ -46,12 +47,6 @@ export default function AdminPage() {
     setToastMessage({ text, type })
     setTimeout(() => setToastMessage(null), 3000)
   }
-
-  // Check if Supabase is configured
-  const isSupabaseConfigured = useCallback(() => {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-    return (url.startsWith('http://') || url.startsWith('https://')) && !url.includes('your_supabase_project_url')
-  }, [])
 
   // ==========================================
   // SECTION: ASSET MANAGEMENT STATE & LOGIC
@@ -85,7 +80,6 @@ export default function AdminPage() {
   })
 
   const fetchAssets = useCallback(async () => {
-    if (!isSupabaseConfigured()) return
     try {
       setLoadingAssets(true)
       const { data, error } = await supabase
@@ -103,7 +97,7 @@ export default function AdminPage() {
     } finally {
       setLoadingAssets(false)
     }
-  }, [isSupabaseConfigured, supabase])
+  }, [supabase])
 
   // ==========================================
   // SECTION: USER MANAGEMENT STATE & LOGIC
@@ -138,30 +132,6 @@ export default function AdminPage() {
   }
 
   const fetchUsers = useCallback(async () => {
-    if (!isSupabaseConfigured()) {
-      setUsers([
-        {
-          id: 'demo-admin-1',
-          email: 'admin@company.com',
-          fullName: 'Quản trị viên Hệ thống',
-          role: 'admin',
-          department: 'Ban Giám đốc',
-          status: 'active',
-          createdAt: new Date().toISOString()
-        },
-        {
-          id: 'demo-user-1',
-          email: 'user@company.com',
-          fullName: 'Nguyễn Văn Thành',
-          role: 'user',
-          department: 'Phòng IT & Công nghệ',
-          status: 'active',
-          createdAt: new Date().toISOString()
-        }
-      ])
-      return
-    }
-
     try {
       setLoadingUsers(true)
       const { data, error } = await supabase
@@ -179,85 +149,92 @@ export default function AdminPage() {
     } finally {
       setLoadingUsers(false)
     }
-  }, [isSupabaseConfigured, supabase])
+  }, [supabase])
 
   // ==========================================
   // AUTH GUARD & REALTIME SYNC
   // ==========================================
   useEffect(() => {
     const checkRole = async () => {
-      if (!isSupabaseConfigured()) return
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        router.push('/auth/login')
-        return
-      }
-
-      let role = user.user_metadata?.role || 'user'
-      let fullName = user.user_metadata?.full_name
-
       try {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('role, full_name')
-          .eq('id', user.id)
-          .single()
-
-        if (profile) {
-          if (profile.role) role = profile.role
-          if (profile.full_name) fullName = profile.full_name
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) {
+          router.push('/auth/login')
+          return
         }
+
+        let role = user.user_metadata?.role || 'user'
+        let fullName = user.user_metadata?.full_name
+
+        try {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('role, full_name, status')
+            .eq('id', user.id)
+            .single()
+
+          if (profile) {
+            if (profile.status && profile.status !== 'active') {
+              await supabase.auth.signOut()
+              router.push('/auth/login')
+              return
+            }
+            if (profile.role) role = profile.role
+            if (profile.full_name) fullName = profile.full_name
+          }
+        } catch (e) {
+          console.warn('Cannot fetch profile:', e)
+        }
+
+        if (role !== 'admin') {
+          router.push('/user')
+          return
+        }
+
+        setAdminUser({
+          full_name: fullName || 'Admin Manager',
+          email: user.email,
+          role: 'admin'
+        })
+        setIsAuthChecking(false)
       } catch (e) {
-        console.warn('Cannot fetch profile:', e)
+        router.push('/auth/login')
       }
-
-      if (role !== 'admin') {
-        router.push('/user')
-        return
-      }
-
-      setAdminUser({
-        full_name: fullName || 'Admin Manager',
-        email: user.email,
-        role: 'admin'
-      })
     }
     checkRole()
-  }, [isSupabaseConfigured, router, supabase])
+  }, [router, supabase])
 
   useEffect(() => {
     fetchAssets()
     fetchUsers()
 
-    if (isSupabaseConfigured()) {
-      const assetsChannel = supabase
-        .channel('realtime_assets_changes')
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'assets' },
-          () => {
-            fetchAssets()
-          }
-        )
-        .subscribe()
+    const assetsChannel = supabase
+      .channel('realtime_assets_changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'assets' },
+        () => {
+          fetchAssets()
+        }
+      )
+      .subscribe()
 
-      const profilesChannel = supabase
-        .channel('realtime_profiles_changes')
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'profiles' },
-          () => {
-            fetchUsers()
-          }
-        )
-        .subscribe()
+    const profilesChannel = supabase
+      .channel('realtime_profiles_changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'profiles' },
+        () => {
+          fetchUsers()
+        }
+      )
+      .subscribe()
 
-      return () => {
-        supabase.removeChannel(assetsChannel)
-        supabase.removeChannel(profilesChannel)
-      }
+    return () => {
+      supabase.removeChannel(assetsChannel)
+      supabase.removeChannel(profilesChannel)
     }
-  }, [fetchAssets, fetchUsers, isSupabaseConfigured, supabase])
+  }, [fetchAssets, fetchUsers, supabase])
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -328,16 +305,14 @@ export default function AdminPage() {
         notes: formData.notes
       }
 
-      if (isSupabaseConfigured()) {
-        const { error } = await supabase
-          .from('assets')
-          .update(updatedFields)
-          .eq('id', editingAsset.id)
+      const { error } = await supabase
+        .from('assets')
+        .update(updatedFields)
+        .eq('id', editingAsset.id)
 
-        if (error) {
-          showToast(`Lỗi cập nhật: ${error.message}`, 'error')
-          return
-        }
+      if (error) {
+        showToast(`Lỗi cập nhật: ${error.message}`, 'error')
+        return
       }
 
       setAssets((prev) =>
@@ -360,31 +335,18 @@ export default function AdminPage() {
         notes: formData.notes || ''
       }
 
-      if (isSupabaseConfigured()) {
-        const { data, error } = await supabase
-          .from('assets')
-          .insert([dbPayload])
-          .select()
+      const { data, error } = await supabase
+        .from('assets')
+        .insert([dbPayload])
+        .select()
 
-        if (error) {
-          showToast(`Lỗi thêm tài sản: ${error.message}`, 'error')
-          return
-        } else if (data && data[0]) {
-          setAssets((prev) => [mapDbRowToAsset(data[0]), ...prev])
-          showToast(`Thêm thành công tài sản mới ${newAssetCodeValue}`)
-          setIsAddAssetModalOpen(false)
-          return
-        }
+      if (error) {
+        showToast(`Lỗi thêm tài sản: ${error.message}`, 'error')
+        return
+      } else if (data && data[0]) {
+        setAssets((prev) => [mapDbRowToAsset(data[0]), ...prev])
+        showToast(`Thêm thành công tài sản mới ${newAssetCodeValue}`)
       }
-
-      const localNewAsset: Asset = {
-        id: Date.now().toString(),
-        ...dbPayload,
-        purchaseDate: dbPayload.purchase_date,
-        serialNumber: dbPayload.serial_number
-      }
-      setAssets((prev) => [localNewAsset, ...prev])
-      showToast(`Thêm thành công tài sản mới ${newAssetCodeValue}`)
     }
     setIsAddAssetModalOpen(false)
   }
@@ -393,17 +355,15 @@ export default function AdminPage() {
     if (!deletingAssetId) return
     const target = assets.find((a) => a.id === deletingAssetId)
 
-    if (isSupabaseConfigured()) {
-      const { error } = await supabase
-        .from('assets')
-        .delete()
-        .eq('id', deletingAssetId)
+    const { error } = await supabase
+      .from('assets')
+      .delete()
+      .eq('id', deletingAssetId)
 
-      if (error) {
-        showToast(`Lỗi xóa: ${error.message}`, 'error')
-        setDeletingAssetId(null)
-        return
-      }
+    if (error) {
+      showToast(`Lỗi xóa: ${error.message}`, 'error')
+      setDeletingAssetId(null)
+      return
     }
 
     setAssets((prev) => prev.filter((a) => a.id !== deletingAssetId))
@@ -488,16 +448,14 @@ export default function AdminPage() {
         status: formData.status
       }
 
-      if (isSupabaseConfigured()) {
-        const { error } = await supabase
-          .from('profiles')
-          .update(updatePayload)
-          .eq('id', formData.id)
+      const { error } = await supabase
+        .from('profiles')
+        .update(updatePayload)
+        .eq('id', formData.id)
 
-        if (error) {
-          showToast(`Lỗi cập nhật người dùng: ${error.message}`, 'error')
-          return
-        }
+      if (error) {
+        showToast(`Lỗi cập nhật người dùng: ${error.message}`, 'error')
+        return
       }
 
       setUsers((prev) =>
@@ -515,70 +473,54 @@ export default function AdminPage() {
       )
       showToast(`Đã cập nhật thông tin & phân quyền cho ${formData.email}`)
     } else {
-      if (isSupabaseConfigured()) {
-        const { data: authData, error: authError } = await supabase.auth.signUp({
-          email: formData.email,
-          password: formData.password || 'Password@123',
-          options: {
-            data: {
-              full_name: formData.fullName,
-              role: formData.role,
-              department: formData.department
-            }
-          }
-        })
-
-        if (authError) {
-          showToast(`Lỗi tạo tài khoản: ${authError.message}`, 'error')
-          return
-        }
-
-        const newUserId = authData.user?.id || `user_${Date.now()}`
-        const { error: profileError } = await supabase
-          .from('profiles')
-          .upsert({
-            id: newUserId,
-            email: formData.email,
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: formData.email,
+        password: formData.password || 'Password@123',
+        options: {
+          data: {
             full_name: formData.fullName,
             role: formData.role,
-            department: formData.department,
-            status: formData.status
-          })
-
-        if (profileError) {
-          console.warn('Profile upsert notice:', profileError.message)
+            department: formData.department
+          }
         }
+      })
 
-        fetchUsers()
-        showToast(`Đã tạo tài khoản mới thành công cho ${formData.email}`)
-      } else {
-        const newLocalUser: UserProfile = {
-          id: `user_${Date.now()}`,
+      if (authError) {
+        showToast(`Lỗi tạo tài khoản: ${authError.message}`, 'error')
+        return
+      }
+
+      const newUserId = authData.user?.id || `user_${Date.now()}`
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .upsert({
+          id: newUserId,
           email: formData.email,
-          fullName: formData.fullName,
+          full_name: formData.fullName,
           role: formData.role,
           department: formData.department,
-          status: formData.status,
-          createdAt: new Date().toISOString()
-        }
-        setUsers((prev) => [newLocalUser, ...prev])
-        showToast(`Đã tạo tài khoản mới thành công cho ${formData.email}`)
+          status: formData.status
+        })
+
+      if (profileError) {
+        console.warn('Profile upsert notice:', profileError.message)
       }
+
+      fetchUsers()
+      showToast(`Đã tạo tài khoản mới thành công cho ${formData.email}`)
     }
     setIsUserModalOpen(false)
   }
 
   const handleUpdateUserStatus = async (user: UserProfile, newStatus: UserStatus) => {
-    if (isSupabaseConfigured()) {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ status: newStatus })
-        .eq('id', user.id)
+    const { error } = await supabase
+      .from('profiles')
+      .update({ status: newStatus })
+      .eq('id', user.id)
 
-      if (error) {
-        showToast(`Lỗi cập nhật trạng thái: ${error.message}`, 'error')
-        return
-      }
+    if (error) {
+      showToast(`Lỗi cập nhật trạng thái: ${error.message}`, 'error')
+      return
     }
 
     setUsers((prev) =>
@@ -602,20 +544,18 @@ export default function AdminPage() {
   }
 
   const handleConfirmDeleteUser = async (user: UserProfile) => {
-    if (isSupabaseConfigured()) {
-      const { error } = await supabase
-        .from('profiles')
-        .delete()
-        .eq('id', user.id)
+    const { error } = await supabase
+      .from('profiles')
+      .delete()
+      .eq('id', user.id)
 
-      if (error) {
-        // Fallback: If hard delete fails (due to Foreign Key to auth.users or assets), lock the account (Banned)
-        console.warn('Cannot hard delete user profile:', error.message)
-        await handleUpdateUserStatus(user, 'banned')
-        showToast(`Đã tự động Khóa tài khoản (Banned) thay vì xóa cứng do ràng buộc dữ liệu.`, 'error')
-        setUserToDelete(null)
-        return
-      }
+    if (error) {
+      // Fallback: If hard delete fails (due to Foreign Key to auth.users or assets), lock the account (Banned)
+      console.warn('Cannot hard delete user profile:', error.message)
+      await handleUpdateUserStatus(user, 'banned')
+      showToast(`Đã tự động Khóa tài khoản (Banned) thay vì xóa cứng do ràng buộc dữ liệu.`, 'error')
+      setUserToDelete(null)
+      return
     }
 
     setUsers((prev) => prev.filter((u) => u.id !== user.id))
@@ -656,6 +596,20 @@ export default function AdminPage() {
       )}
     </>
   )
+
+  if (isAuthChecking) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center space-y-4">
+        <div className="w-12 h-12 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 animate-pulse shadow-lg shadow-indigo-500/10">
+          <Loader2 className="w-6 h-6 animate-spin" />
+        </div>
+        <div className="text-center space-y-1">
+          <p className="text-sm font-bold text-white">Đang xác thực quyền truy cập Quản trị viên...</p>
+          <p className="text-xs text-slate-400">Vui lòng chờ trong giây lát</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <AppLayout

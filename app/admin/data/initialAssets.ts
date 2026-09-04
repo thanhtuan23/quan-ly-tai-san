@@ -1,8 +1,3 @@
-import { Asset } from '../types/asset'
-
-// Dữ liệu tài sản ban đầu (trống, lấy từ cơ sở dữ liệu Supabase)
-export const INITIAL_ASSETS: Asset[] = []
-
 export const CATEGORY_OPTIONS = [
   'Tất cả',
   'IT',

@@ -36,35 +36,18 @@ export default function LoginPage() {
 
   const supabase = createClient()
 
-  const isSupabaseConfigured = () => {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-    return (url.startsWith('http://') || url.startsWith('https://')) && !url.includes('your_supabase_project_url')
-  }
-
   // Google OAuth Handler
   const handleGoogleLogin = async () => {
     setLoading(true)
     setMessage(null)
     try {
-      if (isSupabaseConfigured()) {
-        const { error } = await supabase.auth.signInWithOAuth({
-          provider: 'google',
-          options: {
-            redirectTo: `${window.location.origin}/auth/callback`
-          }
-        })
-        if (error) throw error
-      } else {
-        setTimeout(() => {
-          setMessage({
-            type: 'info',
-            text: 'Đang chuyển hướng với Google Demo Auth... (Chưa cấu hình Supabase URL thực tế)'
-          })
-          setTimeout(() => {
-            router.push('/auth/login')
-          }, 1200)
-        }, 800)
-      }
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`
+        }
+      })
+      if (error) throw error
     } catch (err: any) {
       setMessage({
         type: 'error',
@@ -87,64 +70,51 @@ export default function LoginPage() {
     }
 
     try {
-      if (isSupabaseConfigured()) {
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email: loginEmail,
-          password: loginPassword,
-        })
-        if (error) throw error
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: loginEmail,
+        password: loginPassword,
+      })
+      if (error) throw error
 
-        let role = data.user?.user_metadata?.role || 'user'
-        let status = 'active'
+      let role = data.user?.user_metadata?.role || 'user'
+      let status = 'active'
 
-        // Check role and status in profiles table (database level)
-        if (data.user?.id) {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('role, status')
-            .eq('id', data.user.id)
-            .single()
+      // Check role and status in profiles table (database level)
+      if (data.user?.id) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role, status')
+          .eq('id', data.user.id)
+          .single()
 
-          if (profile) {
-            if (profile.role) role = profile.role
-            if (profile.status) status = profile.status
-          }
+        if (profile) {
+          if (profile.role) role = profile.role
+          if (profile.status) status = profile.status
         }
-
-        // Chặn đăng nhập nếu tài khoản không ở trạng thái active
-        if (status !== 'active') {
-          await supabase.auth.signOut()
-          const statusDescription =
-            status === 'banned'
-              ? 'đã bị khóa vĩnh viễn (Banned)'
-              : 'đang tạm ngưng hoạt động (Inactive)'
-          setMessage({
-            type: 'error',
-            text: `Tài khoản của bạn ${statusDescription}. Vui lòng liên hệ Quản trị viên để được mở khóa truy cập.`
-          })
-          setLoading(false)
-          return
-        }
-
-        const targetRoute = role === 'admin' ? '/admin' : '/user'
-
-        setMessage({ 
-          type: 'success', 
-          text: `Đăng nhập thành công với vai trò ${role === 'admin' ? 'Quản trị viên (Admin)' : 'Nhân viên (User)'}! Đang chuyển hướng...` 
-        })
-        setTimeout(() => router.push(targetRoute), 1000)
-      } else {
-        // Demo Fallback Login (If email contains 'admin' -> /admin, else -> /user)
-        setTimeout(() => {
-          const isDemoAdmin = loginEmail.toLowerCase().includes('admin')
-          const targetRoute = isDemoAdmin ? '/admin' : '/user'
-          setMessage({ 
-            type: 'success', 
-            text: `Đăng nhập thành công (Demo Mode: ${isDemoAdmin ? 'Admin' : 'User'})! Đang chuyển hướng...` 
-          })
-          setTimeout(() => router.push(targetRoute), 1000)
-        }, 800)
       }
+
+      // Chặn đăng nhập nếu tài khoản không ở trạng thái active
+      if (status !== 'active') {
+        await supabase.auth.signOut()
+        const statusDescription =
+          status === 'banned'
+            ? 'đã bị khóa vĩnh viễn (Banned)'
+            : 'đang tạm ngưng hoạt động (Inactive)'
+        setMessage({
+          type: 'error',
+          text: `Tài khoản của bạn ${statusDescription}. Vui lòng liên hệ Quản trị viên để được mở khóa truy cập.`
+        })
+        setLoading(false)
+        return
+      }
+
+      const targetRoute = role === 'admin' ? '/admin' : '/user'
+
+      setMessage({ 
+        type: 'success', 
+        text: `Đăng nhập thành công` 
+      })
+      setTimeout(() => router.push(targetRoute), 1000)
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message || 'Email hoặc mật khẩu không chính xác' })
       setLoading(false)
@@ -164,12 +134,11 @@ export default function LoginPage() {
     }
 
     try {
-      if (isSupabaseConfigured()) {
-        const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail, {
-          redirectTo: `${window.location.origin}/auth/login?reset=true`
-        })
-        if (error) throw error
-      }
+      const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail, {
+        redirectTo: `${window.location.origin}/auth/login?reset=true`
+      })
+      if (error) throw error
+
       setForgotSent(true)
       setMessage({
         type: 'success',
