@@ -12,11 +12,16 @@ import { AssetFilters } from './components/AssetFilters'
 import { AssetTable } from './components/AssetTable'
 import { AssetFormModal } from './components/AssetFormModal'
 import { AssetDetailModal } from './components/AssetDetailModal'
+import { useRouter } from 'next/navigation'
 import { DeleteConfirmModal } from './components/DeleteConfirmModal'
 import { CheckCircle2, AlertCircle, Loader2 } from 'lucide-react'
 
 export default function AdminPage() {
+  const router = useRouter()
   const supabase = createClient()
+
+  // Authenticated Admin User
+  const [adminUser, setAdminUser] = useState<{ full_name?: string; email?: string } | null>(null)
 
   // Main assets data state
   const [assets, setAssets] = useState<Asset[]>([])
@@ -88,6 +93,29 @@ export default function AdminPage() {
       setLoading(false)
     }
   }, [isSupabaseConfigured, supabase])
+
+  // Check user role on mount
+  useEffect(() => {
+    const checkRole = async () => {
+      if (!isSupabaseConfigured()) return
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        router.push('/auth/login')
+        return
+      }
+      const role = user.user_metadata?.role || 'user'
+      if (role !== 'admin') {
+        // Not admin! Redirect to user portal
+        router.push('/user')
+        return
+      }
+      setAdminUser({
+        full_name: user.user_metadata?.full_name,
+        email: user.email
+      })
+    }
+    checkRole()
+  }, [isSupabaseConfigured, router, supabase])
 
   // Initial Load & Realtime subscription
   useEffect(() => {
@@ -309,6 +337,7 @@ export default function AdminPage() {
         onSearchChange={setSearchTerm}
         onExportCSV={handleExport}
         onOpenAddModal={handleOpenAddModal}
+        adminUser={adminUser}
       />
 
       {/* BODY CONTENT AREA */}

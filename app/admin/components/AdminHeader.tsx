@@ -7,6 +7,7 @@ interface AdminHeaderProps {
   onSearchChange: (val: string) => void
   onExportCSV: () => void
   onOpenAddModal: () => void
+  adminUser?: { full_name?: string; email?: string } | null
 }
 
 export const AdminHeader: React.FC<AdminHeaderProps> = ({
@@ -14,8 +15,19 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
   onSearchChange,
   onExportCSV,
   onOpenAddModal,
+  adminUser,
 }) => {
   const router = useRouter()
+
+  const displayName = adminUser?.full_name || 'Admin Manager'
+  const displayEmail = adminUser?.email || 'admin@company.com'
+  const initials = displayName
+    .split(' ')
+    .filter(Boolean)
+    .map((w) => w[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase() || 'AD'
 
   return (
     <header className="bg-slate-900/80 backdrop-blur-md border-b border-slate-800 sticky top-0 z-40 px-4 lg:px-8 py-3.5 flex items-center justify-between">
@@ -27,7 +39,7 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <span className="font-extrabold text-base tracking-wide bg-gradient-to-r from-white to-slate-300 bg-clip-text text-transparent">
-                Quản lý tài sản JGA
+                Quản lý tài sản
               </span>
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-semibold">
                 ADMIN 2026
@@ -84,11 +96,11 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
         {/* User Account Info */}
         <div className="flex items-center gap-3 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800">
           <div className="w-8 h-8 rounded-lg bg-indigo-900/60 border border-indigo-700/50 flex items-center justify-center text-indigo-300 font-bold text-xs">
-            AD
+            {initials}
           </div>
           <div className="hidden xl:block text-left">
-            <p className="text-xs font-bold text-slate-200 leading-tight">Admin Manager</p>
-            <p className="text-[10px] text-slate-400">admin@jga.vn</p>
+            <p className="text-xs font-bold text-slate-200 leading-tight">{displayName}</p>
+            <p className="text-[10px] text-slate-400">{displayEmail}</p>
           </div>
           <button
             onClick={() => router.push('/auth/login')}

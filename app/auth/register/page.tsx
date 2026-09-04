@@ -299,7 +299,7 @@ export default function RegisterPage() {
               onChange={(e) => setAgreeTerms(e.target.checked)}
               className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-indigo-600 focus:ring-indigo-500/30 mt-0.5"
             />
-            <span>Tôi đồng ý với quy định quản lý tài sản & điều khoản dịch vụ JGA</span>
+            <span>Tôi đồng ý với quy định quản lý tài sản & điều khoản dịch vụ</span>
           </label>
         </div>
 

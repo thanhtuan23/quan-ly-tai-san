@@ -88,18 +88,30 @@ export default function LoginPage() {
 
     try {
       if (isSupabaseConfigured()) {
-        const { error } = await supabase.auth.signInWithPassword({
+        const { data, error } = await supabase.auth.signInWithPassword({
           email: loginEmail,
           password: loginPassword,
         })
         if (error) throw error
-        setMessage({ type: 'success', text: 'Đăng nhập thành công! Đang chuyển hướng...' })
-        setTimeout(() => router.push('/admin'), 1000)
+
+        const role = data.user?.user_metadata?.role || 'user'
+        const targetRoute = role === 'admin' ? '/admin' : '/user'
+
+        setMessage({ 
+          type: 'success', 
+          text: `Đăng nhập thành công với vai trò ${role === 'admin' ? 'Quản trị viên (Admin)' : 'Nhân viên (User)'}! Đang chuyển hướng...` 
+        })
+        setTimeout(() => router.push(targetRoute), 1000)
       } else {
-        // Demo Fallback Login
+        // Demo Fallback Login (If email contains 'admin' -> /admin, else -> /user)
         setTimeout(() => {
-          setMessage({ type: 'success', text: 'Đăng nhập thành công (Demo Mode)! Đang vào trang Admin...' })
-          setTimeout(() => router.push('/admin'), 1000)
+          const isDemoAdmin = loginEmail.toLowerCase().includes('admin')
+          const targetRoute = isDemoAdmin ? '/admin' : '/user'
+          setMessage({ 
+            type: 'success', 
+            text: `Đăng nhập thành công (Demo Mode: ${isDemoAdmin ? 'Admin' : 'User'})! Đang chuyển hướng...` 
+          })
+          setTimeout(() => router.push(targetRoute), 1000)
         }, 800)
       }
     } catch (err: any) {
