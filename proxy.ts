@@ -1,6 +1,9 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
+const DEFAULT_SUPABASE_URL = 'https://bfyayvnnhjsiggjoikma.supabase.co'
+const DEFAULT_SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJmeWF5dm5uaGpzaWdnam9pa21hIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg0OTA3NTksImV4cCI6MjEwNDA2Njc1OX0.3Ru3Hw8b_OR6OMUr8HV2E8AGpsHlFrZt8fqRDXz3QmY'
+
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({
     request: {
@@ -8,13 +11,11 @@ export async function proxy(request: NextRequest) {
     },
   })
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+  const envUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim()
+  const envKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim()
 
-  // Bỏ qua nếu chưa cấu hình Supabase
-  if (!url || !key || url.includes('placeholder')) {
-    return response
-  }
+  const url = (envUrl && envUrl.startsWith('http')) ? envUrl : DEFAULT_SUPABASE_URL
+  const key = (envKey && envKey.length > 20) ? envKey : DEFAULT_SUPABASE_KEY
 
   const supabase = createServerClient(
     url,
