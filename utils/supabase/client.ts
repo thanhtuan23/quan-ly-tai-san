@@ -1,5 +1,7 @@
 import { createBrowserClient } from '@supabase/ssr'
 
+let clientInstance: ReturnType<typeof createBrowserClient> | null = null
+
 export function createClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
@@ -8,5 +10,17 @@ export function createClient() {
   const safeUrl = isValidUrl ? url : 'https://placeholder.supabase.co'
   const safeKey = key || 'placeholder-anon-key'
 
-  return createBrowserClient(safeUrl, safeKey)
+  if (clientInstance) {
+    return clientInstance
+  }
+
+  clientInstance = createBrowserClient(safeUrl, safeKey, {
+    global: {
+      headers: {
+        apikey: safeKey,
+      },
+    },
+  })
+
+  return clientInstance
 }

@@ -15,6 +15,11 @@ export async function createClient() {
     safeUrl,
     safeKey,
     {
+      global: {
+        headers: {
+          apikey: safeKey,
+        },
+      },
       cookies: {
         getAll() {
           return cookieStore.getAll()

@@ -23,10 +23,9 @@ export const STATUS_OPTIONS = [
 
 export const DEPARTMENT_OPTIONS = [
   'Phòng IT & Công nghệ',
-  'Phòng Thiết Kế UI/UX',
   'Phòng Kinh doanh',
   'Phòng Hành chính',
   'Phòng Marketing',
   'Ban Giám Đốc',
-  'Kho Trung Tâm'
+  'Kho'
 ] as const

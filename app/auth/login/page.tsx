@@ -50,7 +50,7 @@ export default function LoginPage() {
         const { error } = await supabase.auth.signInWithOAuth({
           provider: 'google',
           options: {
-            redirectTo: `${window.location.origin}/admin`
+            redirectTo: `${window.location.origin}/auth/callback`
           }
         })
         if (error) throw error
@@ -61,7 +61,7 @@ export default function LoginPage() {
             text: 'Đang chuyển hướng với Google Demo Auth... (Chưa cấu hình Supabase URL thực tế)'
           })
           setTimeout(() => {
-            router.push('/admin')
+            router.push('/auth/login')
           }, 1200)
         }, 800)
       }
@@ -94,7 +94,38 @@ export default function LoginPage() {
         })
         if (error) throw error
 
-        const role = data.user?.user_metadata?.role || 'user'
+        let role = data.user?.user_metadata?.role || 'user'
+        let status = 'active'
+
+        // Check role and status in profiles table (database level)
+        if (data.user?.id) {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('role, status')
+            .eq('id', data.user.id)
+            .single()
+
+          if (profile) {
+            if (profile.role) role = profile.role
+            if (profile.status) status = profile.status
+          }
+        }
+
+        // Chặn đăng nhập nếu tài khoản không ở trạng thái active
+        if (status !== 'active') {
+          await supabase.auth.signOut()
+          const statusDescription =
+            status === 'banned'
+              ? 'đã bị khóa vĩnh viễn (Banned)'
+              : 'đang tạm ngưng hoạt động (Inactive)'
+          setMessage({
+            type: 'error',
+            text: `Tài khoản của bạn ${statusDescription}. Vui lòng liên hệ Quản trị viên để được mở khóa truy cập.`
+          })
+          setLoading(false)
+          return
+        }
+
         const targetRoute = role === 'admin' ? '/admin' : '/user'
 
         setMessage({ 

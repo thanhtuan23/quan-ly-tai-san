@@ -138,7 +138,7 @@ export const AssetTable: React.FC<AssetTableProps> = ({
           Tổng giá trị nhóm hiển thị:{' '}
           <strong className="text-white font-bold">{formatVND(totalValue)}</strong>
         </span>
-        <span>Hệ thống Quản lý tài sản JGA Admin Dashboard</span>
+        <span>Hệ thống Quản lý tài sản Admin Dashboard</span>
       </div>
     </div>
   )

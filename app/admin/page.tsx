@@ -1,59 +1,74 @@
 'use client'
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react'
-import { Asset, FilterTab, AssetStats } from './types/asset'
-import { exportAssetsToCSV } from './utils/formatters'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/utils/supabase/client'
 
-// Modular Components
-import { AdminHeader } from './components/AdminHeader'
+// Types
+import { Asset, FilterTab, AssetStats } from './types/asset'
+import { UserProfile, UserRole, UserStatus, UserFilterTab, UserStats as UserStatsType } from './types/user'
+import { exportAssetsToCSV } from './utils/formatters'
+
+// Shared App Layout
+import { AppLayout } from '../components/layout/AppLayout'
+
+// Modular Components - Asset Management
 import { AdminStats } from './components/AdminStats'
 import { AssetFilters } from './components/AssetFilters'
 import { AssetTable } from './components/AssetTable'
 import { AssetFormModal } from './components/AssetFormModal'
 import { AssetDetailModal } from './components/AssetDetailModal'
-import { useRouter } from 'next/navigation'
 import { DeleteConfirmModal } from './components/DeleteConfirmModal'
-import { CheckCircle2, AlertCircle, Loader2 } from 'lucide-react'
+
+// Modular Components - User Management
+import { UserStats } from './components/UserStats'
+import { UserFilters } from './components/UserFilters'
+import { UserTable } from './components/UserTable'
+import { UserFormModal } from './components/UserFormModal'
+import { DeleteUserModal } from './components/DeleteUserModal'
+
+// Icons
+import { CheckCircle2, AlertCircle, Loader2, Download, Plus } from 'lucide-react'
 
 export default function AdminPage() {
   const router = useRouter()
   const supabase = createClient()
 
   // Authenticated Admin User
-  const [adminUser, setAdminUser] = useState<{ full_name?: string; email?: string } | null>(null)
+  const [adminUser, setAdminUser] = useState<{ full_name?: string; email?: string; role?: 'admin' | 'user' } | null>(null)
 
-  // Main assets data state
-  const [assets, setAssets] = useState<Asset[]>([])
-  const [loading, setLoading] = useState(false)
-
-  // Filtering states
-  const [searchTerm, setSearchTerm] = useState('')
-  const [selectedCategory, setSelectedCategory] = useState<string>('Tất cả')
-  const [selectedStatus, setSelectedStatus] = useState<string>('Tất cả')
-  const [activeTab, setActiveTab] = useState<FilterTab>('all')
-
-  // Modals state
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false)
-  const [editingAsset, setEditingAsset] = useState<Asset | null>(null)
-  const [viewingAsset, setViewingAsset] = useState<Asset | null>(null)
-  const [deletingAssetId, setDeletingAssetId] = useState<string | null>(null)
+  // Active View Tab Switcher ('assets' | 'users')
+  const [activeView, setActiveView] = useState<'assets' | 'users'>('assets')
 
   // Toast feedback state
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
-
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
     setToastMessage({ text, type })
     setTimeout(() => setToastMessage(null), 3000)
   }
 
-  // Check if Supabase is properly configured in .env.local
+  // Check if Supabase is configured
   const isSupabaseConfigured = useCallback(() => {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
     return (url.startsWith('http://') || url.startsWith('https://')) && !url.includes('your_supabase_project_url')
   }, [])
 
-  // Helper function to map DB row (snake_case) to Frontend Asset interface
+  // ==========================================
+  // SECTION: ASSET MANAGEMENT STATE & LOGIC
+  // ==========================================
+  const [assets, setAssets] = useState<Asset[]>([])
+  const [loadingAssets, setLoadingAssets] = useState(false)
+  const [assetSearchTerm, setAssetSearchTerm] = useState('')
+  const [selectedCategory, setSelectedCategory] = useState<string>('Tất cả')
+  const [selectedStatus, setSelectedStatus] = useState<string>('Tất cả')
+  const [activeAssetTab, setActiveAssetTab] = useState<FilterTab>('all')
+
+  // Asset Modals
+  const [isAddAssetModalOpen, setIsAddAssetModalOpen] = useState(false)
+  const [editingAsset, setEditingAsset] = useState<Asset | null>(null)
+  const [viewingAsset, setViewingAsset] = useState<Asset | null>(null)
+  const [deletingAssetId, setDeletingAssetId] = useState<string | null>(null)
+
   const mapDbRowToAsset = (row: any): Asset => ({
     id: String(row.id),
     code: row.code || 'TS-UNKNOWN',
@@ -69,32 +84,106 @@ export default function AdminPage() {
     notes: row.notes || ''
   })
 
-  // Fetch Assets from Supabase Database
   const fetchAssets = useCallback(async () => {
-    if (!isSupabaseConfigured()) {
-      return
-    }
-
+    if (!isSupabaseConfigured()) return
     try {
-      setLoading(true)
+      setLoadingAssets(true)
       const { data, error } = await supabase
         .from('assets')
         .select('*')
         .order('created_at', { ascending: false })
 
       if (error) {
-        console.warn('Lỗi tải dữ liệu Supabase:', error.message)
+        console.warn('Lỗi tải dữ liệu Supabase Assets:', error.message)
       } else if (data) {
         setAssets(data.map(mapDbRowToAsset))
       }
     } catch (err: any) {
-      console.error('Fetch error:', err)
+      console.error('Fetch assets error:', err)
     } finally {
-      setLoading(false)
+      setLoadingAssets(false)
     }
   }, [isSupabaseConfigured, supabase])
 
-  // Check user role on mount
+  // ==========================================
+  // SECTION: USER MANAGEMENT STATE & LOGIC
+  // ==========================================
+  const [users, setUsers] = useState<UserProfile[]>([])
+  const [loadingUsers, setLoadingUsers] = useState(false)
+  const [userSearchTerm, setUserSearchTerm] = useState('')
+  const [userActiveTab, setUserActiveTab] = useState<UserFilterTab>('all')
+  const [selectedUserRole, setSelectedUserRole] = useState<string>('Tất cả')
+  const [selectedUserStatus, setSelectedUserStatus] = useState<string>('Tất cả')
+
+  // User Modals
+  const [isUserModalOpen, setIsUserModalOpen] = useState(false)
+  const [editingUser, setEditingUser] = useState<UserProfile | null>(null)
+  const [userToDelete, setUserToDelete] = useState<UserProfile | null>(null)
+
+  const mapDbRowToUser = (row: any): UserProfile => {
+    let st: UserStatus = 'active'
+    if (row.status === 'banned') st = 'banned'
+    else if (row.status === 'inactive' || row.status === 'disabled') st = 'inactive'
+
+    return {
+      id: String(row.id),
+      email: row.email || '',
+      fullName: row.full_name || row.fullName || 'Thành viên',
+      role: (row.role === 'admin' ? 'admin' : 'user') as UserRole,
+      department: row.department || 'Phòng ban',
+      avatarUrl: row.avatar_url || '',
+      status: st,
+      createdAt: row.created_at || new Date().toISOString()
+    }
+  }
+
+  const fetchUsers = useCallback(async () => {
+    if (!isSupabaseConfigured()) {
+      setUsers([
+        {
+          id: 'demo-admin-1',
+          email: 'admin@company.com',
+          fullName: 'Quản trị viên Hệ thống',
+          role: 'admin',
+          department: 'Ban Giám đốc',
+          status: 'active',
+          createdAt: new Date().toISOString()
+        },
+        {
+          id: 'demo-user-1',
+          email: 'user@company.com',
+          fullName: 'Nguyễn Văn Thành',
+          role: 'user',
+          department: 'Phòng IT & Công nghệ',
+          status: 'active',
+          createdAt: new Date().toISOString()
+        }
+      ])
+      return
+    }
+
+    try {
+      setLoadingUsers(true)
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .order('created_at', { ascending: false })
+
+      if (error) {
+        console.warn('Lỗi tải danh sách profiles:', error.message)
+      } else if (data) {
+        setUsers(data.map(mapDbRowToUser))
+      }
+    } catch (err: any) {
+      console.error('Fetch users error:', err)
+    } finally {
+      setLoadingUsers(false)
+    }
+  }, [isSupabaseConfigured, supabase])
+
+  // ==========================================
+  // AUTH GUARD & REALTIME SYNC
+  // ==========================================
   useEffect(() => {
     const checkRole = async () => {
       if (!isSupabaseConfigured()) return
@@ -103,27 +192,45 @@ export default function AdminPage() {
         router.push('/auth/login')
         return
       }
-      const role = user.user_metadata?.role || 'user'
+
+      let role = user.user_metadata?.role || 'user'
+      let fullName = user.user_metadata?.full_name
+
+      try {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role, full_name')
+          .eq('id', user.id)
+          .single()
+
+        if (profile) {
+          if (profile.role) role = profile.role
+          if (profile.full_name) fullName = profile.full_name
+        }
+      } catch (e) {
+        console.warn('Cannot fetch profile:', e)
+      }
+
       if (role !== 'admin') {
-        // Not admin! Redirect to user portal
         router.push('/user')
         return
       }
+
       setAdminUser({
-        full_name: user.user_metadata?.full_name,
-        email: user.email
+        full_name: fullName || 'Admin Manager',
+        email: user.email,
+        role: 'admin'
       })
     }
     checkRole()
   }, [isSupabaseConfigured, router, supabase])
 
-  // Initial Load & Realtime subscription
   useEffect(() => {
     fetchAssets()
+    fetchUsers()
 
-    // Setup Supabase Realtime Channel
     if (isSupabaseConfigured()) {
-      const channel = supabase
+      const assetsChannel = supabase
         .channel('realtime_assets_changes')
         .on(
           'postgres_changes',
@@ -134,67 +241,80 @@ export default function AdminPage() {
         )
         .subscribe()
 
+      const profilesChannel = supabase
+        .channel('realtime_profiles_changes')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'profiles' },
+          () => {
+            fetchUsers()
+          }
+        )
+        .subscribe()
+
       return () => {
-        supabase.removeChannel(channel)
+        supabase.removeChannel(assetsChannel)
+        supabase.removeChannel(profilesChannel)
       }
     }
-  }, [fetchAssets, isSupabaseConfigured, supabase])
+  }, [fetchAssets, fetchUsers, isSupabaseConfigured, supabase])
 
-  // Next asset code generator
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    router.push('/auth/login')
+  }
+
+  // ==========================================
+  // ASSET COMPUTATIONS & HANDLERS
+  // ==========================================
   const nextAssetCode = useMemo(() => {
     const nextNum = (assets.length + 1).toString().padStart(3, '0')
     return `TS-IT-${nextNum}`
   }, [assets.length])
 
-  // Summary Metrics calculations
-  const stats: AssetStats = useMemo(() => {
+  const assetStats: AssetStats = useMemo(() => {
     const totalCount = assets.length
     const totalVal = assets.reduce((sum, item) => sum + (item.value || 0), 0)
     const inUse = assets.filter((a) => a.status === 'Đang sử dụng').length
     const available = assets.filter((a) => a.status === 'Sẵn sàng').length
     const maintenance = assets.filter((a) => a.status === 'Bảo trì').length
     const broken = assets.filter((a) => a.status === 'Hỏng' || a.status === 'Thanh lý').length
-
     return { totalCount, totalVal, inUse, available, maintenance, broken }
   }, [assets])
 
-  // Filtered Assets list
   const filteredAssets = useMemo(() => {
     return assets.filter((item) => {
       const matchesSearch =
-        item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.assignee.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.department.toLowerCase().includes(searchTerm.toLowerCase())
+        item.name.toLowerCase().includes(assetSearchTerm.toLowerCase()) ||
+        item.code.toLowerCase().includes(assetSearchTerm.toLowerCase()) ||
+        item.assignee.toLowerCase().includes(assetSearchTerm.toLowerCase()) ||
+        item.department.toLowerCase().includes(assetSearchTerm.toLowerCase())
 
       const matchesCategory = selectedCategory === 'Tất cả' || item.category === selectedCategory
       const matchesStatus = selectedStatus === 'Tất cả' || item.status === selectedStatus
 
       let matchesTab = true
-      if (activeTab === 'using') matchesTab = item.status === 'Đang sử dụng'
-      if (activeTab === 'available') matchesTab = item.status === 'Sẵn sàng'
-      if (activeTab === 'maintenance') matchesTab = item.status === 'Bảo trì'
-      if (activeTab === 'broken') matchesTab = item.status === 'Hỏng' || item.status === 'Thanh lý'
+      if (activeAssetTab === 'using') matchesTab = item.status === 'Đang sử dụng'
+      if (activeAssetTab === 'available') matchesTab = item.status === 'Sẵn sàng'
+      if (activeAssetTab === 'maintenance') matchesTab = item.status === 'Bảo trì'
+      if (activeAssetTab === 'broken') matchesTab = item.status === 'Hỏng' || item.status === 'Thanh lý'
 
       return matchesSearch && matchesCategory && matchesStatus && matchesTab
     })
-  }, [assets, searchTerm, selectedCategory, selectedStatus, activeTab])
+  }, [assets, assetSearchTerm, selectedCategory, selectedStatus, activeAssetTab])
 
-  // Modal Handlers
-  const handleOpenAddModal = () => {
+  const handleOpenAddAssetModal = () => {
     setEditingAsset(null)
-    setIsAddModalOpen(true)
+    setIsAddAssetModalOpen(true)
   }
 
-  const handleOpenEditModal = (asset: Asset) => {
+  const handleOpenEditAssetModal = (asset: Asset) => {
     setEditingAsset(asset)
-    setIsAddModalOpen(true)
+    setIsAddAssetModalOpen(true)
   }
 
-  // Create or Update Asset in Supabase & Local State
   const handleSaveAsset = async (formData: Partial<Asset>) => {
     if (editingAsset) {
-      // UPDATE ASSET
       const updatedFields = {
         name: formData.name,
         category: formData.category,
@@ -215,18 +335,16 @@ export default function AdminPage() {
           .eq('id', editingAsset.id)
 
         if (error) {
-          showToast(`Lỗi cập nhật Supabase: ${error.message}`, 'error')
+          showToast(`Lỗi cập nhật: ${error.message}`, 'error')
           return
         }
       }
 
-      // Optimistic local update
       setAssets((prev) =>
         prev.map((a) => (a.id === editingAsset.id ? ({ ...a, ...formData } as Asset) : a))
       )
       showToast(`Đã cập nhật thông tin tài sản ${formData.code || editingAsset.code}`)
     } else {
-      // INSERT NEW ASSET
       const newAssetCodeValue = formData.code || nextAssetCode
       const dbPayload = {
         code: newAssetCodeValue,
@@ -249,17 +367,16 @@ export default function AdminPage() {
           .select()
 
         if (error) {
-          showToast(`Lỗi thêm tài sản vào Supabase: ${error.message}`, 'error')
+          showToast(`Lỗi thêm tài sản: ${error.message}`, 'error')
           return
         } else if (data && data[0]) {
           setAssets((prev) => [mapDbRowToAsset(data[0]), ...prev])
           showToast(`Thêm thành công tài sản mới ${newAssetCodeValue}`)
-          setIsAddModalOpen(false)
+          setIsAddAssetModalOpen(false)
           return
         }
       }
 
-      // Fallback local insertion
       const localNewAsset: Asset = {
         id: Date.now().toString(),
         ...dbPayload,
@@ -269,11 +386,10 @@ export default function AdminPage() {
       setAssets((prev) => [localNewAsset, ...prev])
       showToast(`Thêm thành công tài sản mới ${newAssetCodeValue}`)
     }
-    setIsAddModalOpen(false)
+    setIsAddAssetModalOpen(false)
   }
 
-  // Delete Asset in Supabase & Local State
-  const handleDeleteConfirm = async () => {
+  const handleDeleteAssetConfirm = async () => {
     if (!deletingAssetId) return
     const target = assets.find((a) => a.id === deletingAssetId)
 
@@ -284,7 +400,7 @@ export default function AdminPage() {
         .eq('id', deletingAssetId)
 
       if (error) {
-        showToast(`Lỗi xóa Supabase: ${error.message}`, 'error')
+        showToast(`Lỗi xóa: ${error.message}`, 'error')
         setDeletingAssetId(null)
         return
       }
@@ -295,24 +411,275 @@ export default function AdminPage() {
     setDeletingAssetId(null)
   }
 
-  const handleResetFilters = () => {
-    setSearchTerm('')
-    setSelectedCategory('Tất cả')
-    setSelectedStatus('Tất cả')
-    setActiveTab('all')
-  }
+  const assetToDelete = useMemo(() => {
+    return assets.find((a) => a.id === deletingAssetId) || null
+  }, [assets, deletingAssetId])
 
   const handleExport = () => {
     exportAssetsToCSV(filteredAssets)
     showToast('Đã xuất báo cáo CSV thành công!')
   }
 
-  const assetToDelete = useMemo(() => {
-    return assets.find((a) => a.id === deletingAssetId) || null
-  }, [assets, deletingAssetId])
+  // ==========================================
+  // USER COMPUTATIONS & HANDLERS
+  // ==========================================
+  const userStats: UserStatsType = useMemo(() => {
+    const totalUsers = users.length
+    const adminCount = users.filter((u) => u.role === 'admin').length
+    const employeeCount = users.filter((u) => u.role === 'user').length
+    const activeCount = users.filter((u) => u.status === 'active').length
+    const inactiveCount = users.filter((u) => u.status === 'inactive').length
+    const bannedCount = users.filter((u) => u.status === 'banned').length
+    return { totalUsers, adminCount, employeeCount, activeCount, inactiveCount, bannedCount }
+  }, [users])
+
+  const filteredUsers = useMemo(() => {
+    return users.filter((user) => {
+      const matchesSearch =
+        user.fullName.toLowerCase().includes(userSearchTerm.toLowerCase()) ||
+        user.email.toLowerCase().includes(userSearchTerm.toLowerCase()) ||
+        user.department.toLowerCase().includes(userSearchTerm.toLowerCase())
+
+      let matchesRole = true
+      if (selectedUserRole !== 'Tất cả') {
+        matchesRole = user.role === selectedUserRole
+      }
+
+      let matchesStatus = true
+      if (selectedUserStatus !== 'Tất cả') {
+        matchesStatus = user.status === selectedUserStatus
+      }
+
+      let matchesTab = true
+      if (userActiveTab === 'admin') matchesTab = user.role === 'admin'
+      if (userActiveTab === 'user') matchesTab = user.role === 'user'
+      if (userActiveTab === 'active') matchesTab = user.status === 'active'
+      if (userActiveTab === 'inactive') matchesTab = user.status === 'inactive'
+      if (userActiveTab === 'banned') matchesTab = user.status === 'banned'
+
+      return matchesSearch && matchesRole && matchesStatus && matchesTab
+    })
+  }, [users, userSearchTerm, selectedUserRole, selectedUserStatus, userActiveTab])
+
+  const handleOpenAddUserModal = () => {
+    setEditingUser(null)
+    setIsUserModalOpen(true)
+  }
+
+  const handleOpenEditUserModal = (user: UserProfile) => {
+    setEditingUser(user)
+    setIsUserModalOpen(true)
+  }
+
+  const handleSaveUser = async (formData: {
+    id?: string
+    fullName: string
+    email: string
+    role: UserRole
+    department: string
+    status: UserStatus
+    password?: string
+  }) => {
+    if (formData.id) {
+      const updatePayload = {
+        full_name: formData.fullName,
+        role: formData.role,
+        department: formData.department,
+        status: formData.status
+      }
+
+      if (isSupabaseConfigured()) {
+        const { error } = await supabase
+          .from('profiles')
+          .update(updatePayload)
+          .eq('id', formData.id)
+
+        if (error) {
+          showToast(`Lỗi cập nhật người dùng: ${error.message}`, 'error')
+          return
+        }
+      }
+
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === formData.id
+            ? {
+                ...u,
+                fullName: formData.fullName,
+                role: formData.role,
+                department: formData.department,
+                status: formData.status
+              }
+            : u
+        )
+      )
+      showToast(`Đã cập nhật thông tin & phân quyền cho ${formData.email}`)
+    } else {
+      if (isSupabaseConfigured()) {
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+          email: formData.email,
+          password: formData.password || 'Password@123',
+          options: {
+            data: {
+              full_name: formData.fullName,
+              role: formData.role,
+              department: formData.department
+            }
+          }
+        })
+
+        if (authError) {
+          showToast(`Lỗi tạo tài khoản: ${authError.message}`, 'error')
+          return
+        }
+
+        const newUserId = authData.user?.id || `user_${Date.now()}`
+        const { error: profileError } = await supabase
+          .from('profiles')
+          .upsert({
+            id: newUserId,
+            email: formData.email,
+            full_name: formData.fullName,
+            role: formData.role,
+            department: formData.department,
+            status: formData.status
+          })
+
+        if (profileError) {
+          console.warn('Profile upsert notice:', profileError.message)
+        }
+
+        fetchUsers()
+        showToast(`Đã tạo tài khoản mới thành công cho ${formData.email}`)
+      } else {
+        const newLocalUser: UserProfile = {
+          id: `user_${Date.now()}`,
+          email: formData.email,
+          fullName: formData.fullName,
+          role: formData.role,
+          department: formData.department,
+          status: formData.status,
+          createdAt: new Date().toISOString()
+        }
+        setUsers((prev) => [newLocalUser, ...prev])
+        showToast(`Đã tạo tài khoản mới thành công cho ${formData.email}`)
+      }
+    }
+    setIsUserModalOpen(false)
+  }
+
+  const handleUpdateUserStatus = async (user: UserProfile, newStatus: UserStatus) => {
+    if (isSupabaseConfigured()) {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ status: newStatus })
+        .eq('id', user.id)
+
+      if (error) {
+        showToast(`Lỗi cập nhật trạng thái: ${error.message}`, 'error')
+        return
+      }
+    }
+
+    setUsers((prev) =>
+      prev.map((u) => (u.id === user.id ? { ...u, status: newStatus } : u))
+    )
+
+    const label =
+      newStatus === 'active'
+        ? 'Kích hoạt thành công'
+        : newStatus === 'inactive'
+        ? 'Đã chuyển sang tạm ngưng'
+        : 'Đã khóa tài khoản (Banned)'
+
+    showToast(`${label} cho ${user.email}`)
+    setUserToDelete(null)
+  }
+
+  const handleToggleUserStatus = async (user: UserProfile) => {
+    const nextStatus: UserStatus = user.status === 'active' ? 'banned' : 'active'
+    await handleUpdateUserStatus(user, nextStatus)
+  }
+
+  const handleConfirmDeleteUser = async (user: UserProfile) => {
+    if (isSupabaseConfigured()) {
+      const { error } = await supabase
+        .from('profiles')
+        .delete()
+        .eq('id', user.id)
+
+      if (error) {
+        // Fallback: If hard delete fails (due to Foreign Key to auth.users or assets), lock the account (Banned)
+        console.warn('Cannot hard delete user profile:', error.message)
+        await handleUpdateUserStatus(user, 'banned')
+        showToast(`Đã tự động Khóa tài khoản (Banned) thay vì xóa cứng do ràng buộc dữ liệu.`, 'error')
+        setUserToDelete(null)
+        return
+      }
+    }
+
+    setUsers((prev) => prev.filter((u) => u.id !== user.id))
+    showToast(`Đã xóa hồ sơ người dùng ${user.email}`)
+    setUserToDelete(null)
+  }
+
+  // Header quick actions slot depending on active tab
+  const actionsSlot = (
+    <>
+      {activeView === 'assets' ? (
+        <>
+          <button
+            onClick={handleExport}
+            className="h-9 hidden sm:inline-flex items-center gap-1.5 px-3 bg-slate-800 hover:bg-slate-750 border border-slate-700 rounded-xl text-xs font-semibold text-slate-200 transition-all shrink-0"
+            title="Xuất danh sách ra file CSV"
+          >
+            <Download className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Xuất CSV</span>
+          </button>
+
+          <button
+            onClick={handleOpenAddAssetModal}
+            className="h-9 inline-flex items-center gap-1.5 px-3.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-indigo-600/30 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Thêm tài sản</span>
+          </button>
+        </>
+      ) : (
+        <button
+          onClick={handleOpenAddUserModal}
+          className="h-9 inline-flex items-center gap-1.5 px-3.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-purple-600/30 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0"
+        >
+          <Plus className="w-4 h-4" />
+          <span>Thêm người dùng</span>
+        </button>
+      )}
+    </>
+  )
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans flex flex-col">
+    <AppLayout
+      currentPortal="admin"
+      activeItem={activeView}
+      onSelectNavItem={(item) => setActiveView(item as 'assets' | 'users')}
+      title={activeView === 'assets' ? 'Quản lý Tài sản Doanh nghiệp' : 'Quản lý Người dùng & Phân quyền'}
+      subtitle={
+        activeView === 'assets'
+          ? 'Theo dõi, phân bổ, bảo trì và kiểm kê toàn bộ thiết bị'
+          : 'Quản lý danh sách tài khoản, vai trò Role và trạng thái hoạt động'
+      }
+      searchTerm={activeView === 'assets' ? assetSearchTerm : userSearchTerm}
+      onSearchChange={activeView === 'assets' ? setAssetSearchTerm : setUserSearchTerm}
+      searchPlaceholder={
+        activeView === 'assets'
+          ? 'Tìm theo Mã TS, Tên tài sản, Người quản lý...'
+          : 'Tìm theo Họ tên, Email, Phòng ban...'
+      }
+      actionsSlot={actionsSlot}
+      currentUser={adminUser}
+      counts={{ assets: assets.length, users: users.length }}
+      onLogout={handleLogout}
+    >
       {/* Toast Notification Alert */}
       {toastMessage && (
         <div
@@ -331,72 +698,121 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* TOP NAVBAR HEADER */}
-      <AdminHeader
-        searchTerm={searchTerm}
-        onSearchChange={setSearchTerm}
-        onExportCSV={handleExport}
-        onOpenAddModal={handleOpenAddModal}
-        adminUser={adminUser}
-      />
+      {/* VIEW 1: ASSETS */}
+      {activeView === 'assets' && (
+        <>
+          <AdminStats stats={assetStats} />
 
-      {/* BODY CONTENT AREA */}
-      <main className="flex-1 p-4 lg:p-8 max-w-7xl w-full mx-auto space-y-6">
-        {/* SUMMARY STATS DASHBOARD CARDS */}
-        <AdminStats stats={stats} />
-
-        {/* TOOLBAR: TAB NAVIGATION & SEARCH & FILTERS */}
-        <AssetFilters
-          stats={stats}
-          totalFiltered={filteredAssets.length}
-          activeTab={activeTab}
-          onTabChange={setActiveTab}
-          selectedCategory={selectedCategory}
-          onCategoryChange={setSelectedCategory}
-          selectedStatus={selectedStatus}
-          onStatusChange={setSelectedStatus}
-          searchTerm={searchTerm}
-          onSearchChange={setSearchTerm}
-          onResetFilters={handleResetFilters}
-        />
-
-        {/* ASSET DATA GRID TABLE */}
-        {loading ? (
-          <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-16 flex flex-col items-center justify-center space-y-3">
-            <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
-            <p className="text-xs text-slate-400">Đang đồng bộ dữ liệu tài sản từ Supabase...</p>
-          </div>
-        ) : (
-          <AssetTable
-            assets={filteredAssets}
-            onView={setViewingAsset}
-            onEdit={handleOpenEditModal}
-            onDelete={setDeletingAssetId}
+          <AssetFilters
+            stats={assetStats}
+            totalFiltered={filteredAssets.length}
+            activeTab={activeAssetTab}
+            onTabChange={setActiveAssetTab}
+            selectedCategory={selectedCategory}
+            onCategoryChange={setSelectedCategory}
+            selectedStatus={selectedStatus}
+            onStatusChange={setSelectedStatus}
+            searchTerm={assetSearchTerm}
+            onSearchChange={setAssetSearchTerm}
+            onResetFilters={() => {
+              setAssetSearchTerm('')
+              setSelectedCategory('Tất cả')
+              setSelectedStatus('Tất cả')
+              setActiveAssetTab('all')
+            }}
           />
-        )}
-      </main>
 
-      {/* MODAL: ADD / EDIT ASSET */}
+          {loadingAssets ? (
+            <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-16 flex flex-col items-center justify-center space-y-3">
+              <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
+              <p className="text-xs text-slate-400">Đang đồng bộ dữ liệu tài sản từ Supabase...</p>
+            </div>
+          ) : (
+            <AssetTable
+              assets={filteredAssets}
+              onView={setViewingAsset}
+              onEdit={handleOpenEditAssetModal}
+              onDelete={setDeletingAssetId}
+            />
+          )}
+        </>
+      )}
+
+      {/* VIEW 2: USERS */}
+      {activeView === 'users' && (
+        <>
+          <UserStats stats={userStats} />
+
+          <UserFilters
+            stats={userStats}
+            totalFiltered={filteredUsers.length}
+            activeTab={userActiveTab}
+            onTabChange={setUserActiveTab}
+            selectedRole={selectedUserRole}
+            onRoleChange={setSelectedUserRole}
+            selectedStatus={selectedUserStatus}
+            onStatusChange={setSelectedUserStatus}
+            searchTerm={userSearchTerm}
+            onSearchChange={setUserSearchTerm}
+            onResetFilters={() => {
+              setUserSearchTerm('')
+              setUserActiveTab('all')
+              setSelectedUserRole('Tất cả')
+              setSelectedUserStatus('Tất cả')
+            }}
+          />
+
+          {loadingUsers ? (
+            <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-16 flex flex-col items-center justify-center space-y-3">
+              <Loader2 className="w-8 h-8 text-purple-500 animate-spin" />
+              <p className="text-xs text-slate-400">Đang tải danh sách tài khoản người dùng...</p>
+            </div>
+          ) : (
+            <UserTable
+              users={filteredUsers}
+              currentAdminEmail={adminUser?.email}
+              onEdit={handleOpenEditUserModal}
+              onToggleStatus={handleToggleUserStatus}
+              onDelete={setUserToDelete}
+            />
+          )}
+        </>
+      )}
+
+      {/* Modals for Assets */}
       <AssetFormModal
-        isOpen={isAddModalOpen}
+        isOpen={isAddAssetModalOpen}
         editingAsset={editingAsset}
         nextAssetCode={nextAssetCode}
-        onClose={() => setIsAddModalOpen(false)}
+        onClose={() => setIsAddAssetModalOpen(false)}
         onSave={handleSaveAsset}
       />
 
-      {/* MODAL: VIEW ASSET DETAILS */}
       <AssetDetailModal
         asset={viewingAsset}
         onClose={() => setViewingAsset(null)}
       />
 
-      {/* MODAL: DELETE CONFIRMATION */}
       <DeleteConfirmModal
         assetToDelete={assetToDelete}
         onClose={() => setDeletingAssetId(null)}
-        onConfirm={handleDeleteConfirm}
+        onConfirm={handleDeleteAssetConfirm}
       />
-    </div>
+
+      {/* Modals for Users */}
+      <UserFormModal
+        isOpen={isUserModalOpen}
+        editingUser={editingUser}
+        onClose={() => setIsUserModalOpen(false)}
+        onSave={handleSaveUser}
+      />
+
+      <DeleteUserModal
+        userToDelete={userToDelete}
+        onClose={() => setUserToDelete(null)}
+        onUpdateStatus={handleUpdateUserStatus}
+        onConfirmDelete={handleConfirmDeleteUser}
+      />
+    </AppLayout>
   )
 }
