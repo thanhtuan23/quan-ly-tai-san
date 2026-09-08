@@ -6,15 +6,22 @@ export interface Asset {
   id: string
   code: string
   name: string
+  model?: string                      // Model thiết bị (VD: Dell Latitude 5420, Cisco C1300...)
   category: AssetCategory
   status: AssetStatus
   assignee: string
   department: string
-  value: number
-  purchaseDate: string
+  value: number                       // Giá mua ban đầu (VNĐ)
+  purchaseDate: string                // Ngày mua / đưa vào sử dụng
+  warrantyYears?: number              // Thời hạn bảo hành (VD: 2 năm, 3 năm)
   location: string
   serialNumber?: string
+  imei?: string
   notes?: string
+  // Tính toán khấu hao & vòng đời
+  depreciationRate?: number           // % khấu hao đã qua
+  currentValue?: number               // Giá trị còn lại
+  lifecycleStatus?: 'in_warranty' | 'expiring_soon' | 'end_of_life'
 }
 
 export interface AssetStats {

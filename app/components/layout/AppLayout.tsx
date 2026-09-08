@@ -3,6 +3,7 @@
 import React, { useState } from 'react'
 import { AppSidebar, PortalType } from './AppSidebar'
 import { AppHeader } from './AppHeader'
+import { UserRole, UserModulePermissions } from '../../admin/types/user'
 
 interface AppLayoutProps {
   currentPortal: PortalType
@@ -18,14 +19,22 @@ interface AppLayoutProps {
     id?: string
     email?: string
     full_name?: string
-    role?: 'admin' | 'user'
+    role?: UserRole
     department?: string
+    permissions?: UserModulePermissions
   } | null
   counts?: {
     assets?: number
     users?: number
     myAssets?: number
+    warranty?: number
+    warrantyWarning?: number
+    inspectionUnchecked?: number
+    inspectionAlerts?: number
   }
+  enabledModules?: Record<string, boolean>
+  onOpenSettings?: () => void
+  onOpenTelegramSettings?: () => void
   onLogout?: () => void
   children: React.ReactNode
 }
@@ -42,6 +51,9 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   actionsSlot,
   currentUser,
   counts,
+  enabledModules,
+  onOpenSettings,
+  onOpenTelegramSettings,
   onLogout,
   children,
 }) => {
@@ -61,6 +73,9 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
         isCollapsed={isSidebarCollapsed}
         onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
         counts={counts}
+        enabledModules={enabledModules}
+        onOpenSettings={onOpenSettings}
+        onOpenTelegramSettings={onOpenTelegramSettings}
         onLogout={onLogout}
       />
 
@@ -80,7 +95,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           onSearchChange={onSearchChange}
           searchPlaceholder={searchPlaceholder}
           actionsSlot={actionsSlot}
-          currentUser={currentUser}
+          currentUser={currentUser ? { ...currentUser, role: currentUser.role === 'manager' ? 'admin' : currentUser.role } : null}
           onLogout={onLogout}
         />
 
