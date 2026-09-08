@@ -7,6 +7,9 @@ import { Asset } from '../admin/types/asset'
 import { StatusBadge } from '../admin/components/StatusBadge'
 import { formatVND } from '../admin/utils/formatters'
 import { AppLayout } from '../components/layout/AppLayout'
+import { DailyChecklistTable } from '../admin/components/DailyChecklistTable'
+import { InspectionHistoryModal } from '../admin/components/InspectionHistoryModal'
+import { useDailyInspection } from '../hooks/useDailyInspection'
 import {
   Laptop,
   User,
@@ -16,7 +19,10 @@ import {
   CheckCircle2,
   PlusCircle,
   X,
-  Loader2
+  Loader2,
+  CheckSquare,
+  AlertTriangle,
+  ClipboardList
 } from 'lucide-react'
 
 export default function UserPortalPage() {
@@ -29,6 +35,7 @@ export default function UserPortalPage() {
   const [loading, setLoading] = useState(true)
   const [myAssets, setMyAssets] = useState<Asset[]>([])
   const [searchTerm, setSearchTerm] = useState('')
+  const [activeTab, setActiveTab] = useState<'my-assets' | 'inspection'>('my-assets')
 
   // Modals
   const [isRequestModalOpen, setIsRequestModalOpen] = useState(false)
@@ -48,6 +55,28 @@ export default function UserPortalPage() {
     setTimeout(() => setToastMessage(null), 3000)
   }
 
+  const displayName = currentUser?.user_metadata?.full_name || currentUser?.email?.split('@')[0] || 'Thành viên'
+  const displayEmail = currentUser?.email || 'user@company.com'
+  const department = currentUser?.user_metadata?.department || 'Phòng IT & Công nghệ'
+
+  // Sử dụng Hook useDailyInspection dùng chung cho User
+  const {
+    inspectableDevices,
+    inspectionLogs,
+    stats: inspectionStats,
+    loading: loadingInspection,
+    historyViewingDevice,
+    setHistoryViewingDevice,
+    fetchData: fetchInspectionData,
+    handleQuickCheck
+  } = useDailyInspection({
+    userRole: userRole as any,
+    userName: displayName,
+    userId: currentUser?.id,
+    department: department,
+    onShowToast: showToast
+  })
+
   // Check auth and fetch user's assigned assets
   const checkAuthAndFetchAssets = useCallback(async () => {
     try {
@@ -55,13 +84,12 @@ export default function UserPortalPage() {
       const { data: { user }, error: authError } = await supabase.auth.getUser()
 
       if (authError || !user) {
-        // Redirect to login if user is not authenticated
         router.push('/auth/login')
         return
       } else {
         let role = user.user_metadata?.role || 'user'
         let fullName = user.user_metadata?.full_name || ''
-        let department = user.user_metadata?.department || 'Phòng ban'
+        let dept = user.user_metadata?.department || 'Phòng ban'
 
         // Fetch from database profiles table
         try {
@@ -79,7 +107,7 @@ export default function UserPortalPage() {
             }
             if (profile.role) role = profile.role
             if (profile.full_name) fullName = profile.full_name
-            if (profile.department) department = profile.department
+            if (profile.department) dept = profile.department
           }
         } catch (e) {
           console.warn('Cannot fetch profile:', e)
@@ -91,7 +119,7 @@ export default function UserPortalPage() {
             ...user.user_metadata,
             full_name: fullName,
             role: role,
-            department: department
+            department: dept
           }
         })
         setUserRole(role)
@@ -135,7 +163,8 @@ export default function UserPortalPage() {
 
   useEffect(() => {
     checkAuthAndFetchAssets()
-  }, [checkAuthAndFetchAssets])
+    fetchInspectionData()
+  }, [checkAuthAndFetchAssets, fetchInspectionData])
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -171,9 +200,6 @@ export default function UserPortalPage() {
       a.code.toLowerCase().includes(searchTerm.toLowerCase())
   )
 
-  const displayName = currentUser?.user_metadata?.full_name || currentUser?.email?.split('@')[0] || 'Thành viên'
-  const displayEmail = currentUser?.email || 'user@company.com'
-
   const actionsSlot = (
     <button
       onClick={() => setIsRequestModalOpen(true)}
@@ -201,8 +227,10 @@ export default function UserPortalPage() {
   return (
     <AppLayout
       currentPortal="user"
-      activeItem="my-assets"
+      activeItem={activeTab === 'my-assets' ? 'my-assets' : 'user-inspection'}
       onSelectNavItem={(item) => {
+        if (item === 'my-assets') setActiveTab('my-assets')
+        if (item === 'user-inspection') setActiveTab('inspection')
         if (item === 'request-modal') setIsRequestModalOpen(true)
         if (item === 'report-modal') {
           if (myAssets.length > 0) {
@@ -211,11 +239,11 @@ export default function UserPortalPage() {
           setIsReportModalOpen(true)
         }
       }}
-      title="Cổng Thông Tin Tài Sản Cá Nhân"
-      subtitle="Theo dõi và quản lý các trang thiết bị công ty đã cấp phát cho bạn"
+      title={activeTab === 'my-assets' ? "Cổng Thông Tin Tài Sản Cá Nhân" : "Kiểm Tra & Checklist Thiết Bị Hàng Ngày"}
+      subtitle={activeTab === 'my-assets' ? "Theo dõi và quản lý các trang thiết bị công ty đã cấp phát cho bạn" : "Thực hiện chấm checklist kiểm tra tình trạng máy móc thiết bị theo ca trực"}
       searchTerm={searchTerm}
       onSearchChange={setSearchTerm}
-      searchPlaceholder="Tìm kiếm tài sản theo tên, mã TS..."
+      searchPlaceholder={activeTab === 'my-assets' ? "Tìm kiếm tài sản theo tên, mã TS..." : "Tìm kiếm thiết bị cần kiểm tra..."}
       actionsSlot={actionsSlot}
       currentUser={
         currentUser
@@ -227,7 +255,11 @@ export default function UserPortalPage() {
           }
           : null
       }
-      counts={{ myAssets: myAssets.length }}
+      counts={{
+        myAssets: myAssets.length,
+        inspectionUnchecked: inspectionStats.uncheckedToday,
+        inspectionAlerts: inspectionStats.unstableCount + inspectionStats.damagedCount
+      }}
       onLogout={handleLogout}
     >
       {/* Toast Notification Alert */}
@@ -261,93 +293,174 @@ export default function UserPortalPage() {
         </div>
       </div>
 
-      {/* SECTION: MY ASSETS LIST */}
-      <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 space-y-5 shadow-xl">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
-          <div>
-            <h3 className="text-base font-bold text-white flex items-center gap-2">
-              <Laptop className="w-5 h-5 text-indigo-400" />
-              Tài sản đang phụ trách ({myAssets.length})
-            </h3>
-            <p className="text-xs text-slate-400">Danh sách các thiết bị công ty được giao cho bạn quản lý</p>
-          </div>
+      {/* Tab Navigation Switches */}
+      <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+        <button
+          onClick={() => setActiveTab('my-assets')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            activeTab === 'my-assets'
+              ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
+              : 'bg-slate-900/60 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
+          }`}
+        >
+          <Laptop className="w-4 h-4" />
+          <span>Tài sản của tôi ({myAssets.length})</span>
+        </button>
 
-          <div className="relative max-w-xs w-full">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Tìm kiếm tài sản..."
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2 pl-9 pr-3 text-xs text-slate-200 placeholder-slate-500 outline-none focus:border-indigo-500 transition-all"
-            />
-          </div>
-        </div>
+        <button
+          onClick={() => setActiveTab('inspection')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            activeTab === 'inspection'
+              ? 'bg-sky-600 text-white shadow-lg shadow-sky-600/30'
+              : 'bg-slate-900/60 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
+          }`}
+        >
+          <CheckSquare className="w-4 h-4" />
+          <span>Nhiệm vụ Kiểm Tra & Checklist</span>
+          {inspectionStats.uncheckedToday > 0 && (
+            <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-amber-500/20 text-amber-300 font-mono">
+              {inspectionStats.uncheckedToday} cần làm
+            </span>
+          )}
+        </button>
+      </div>
 
-        {filteredAssets.length === 0 ? (
-          <div className="py-12 text-center text-slate-500 space-y-3">
-            <div className="w-12 h-12 rounded-2xl bg-slate-800/80 flex items-center justify-center mx-auto text-slate-400">
-              <Laptop className="w-6 h-6" />
-            </div>
+      {/* VIEW 1: MY ASSETS LIST */}
+      {activeTab === 'my-assets' && (
+        <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 space-y-5 shadow-xl">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
             <div>
-              <p className="text-sm font-semibold text-slate-300">Bạn chưa được cấp phát tài sản nào</p>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Nhấn nút &ldquo;Đề xuất cấp phát&rdquo; ở trên để gửi yêu cầu mượn máy tính, màn hình hoặc thiết bị làm việc.
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <Laptop className="w-5 h-5 text-indigo-400" />
+                Tài sản đang phụ trách ({myAssets.length})
+              </h3>
+              <p className="text-xs text-slate-400">Danh sách các thiết bị công ty được giao cho bạn quản lý</p>
+            </div>
+
+            <div className="relative max-w-xs w-full">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Tìm kiếm tài sản..."
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2 pl-9 pr-3 text-xs text-slate-200 placeholder-slate-500 outline-none focus:border-indigo-500 transition-all"
+              />
+            </div>
+          </div>
+
+          {filteredAssets.length === 0 ? (
+            <div className="py-12 text-center text-slate-500 space-y-3">
+              <div className="w-12 h-12 rounded-2xl bg-slate-800/80 flex items-center justify-center mx-auto text-slate-400">
+                <Laptop className="w-6 h-6" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-slate-300">Bạn chưa được cấp phát tài sản nào</p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Nhấn nút &ldquo;Đề xuất cấp phát&rdquo; ở trên để gửi yêu cầu mượn máy tính, màn hình hoặc thiết bị làm việc.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {filteredAssets.map((asset) => (
+                <div
+                  key={asset.id}
+                  className="bg-slate-950/70 border border-slate-800 hover:border-slate-700 rounded-2xl p-5 space-y-4 transition-all hover:shadow-lg hover:shadow-indigo-500/5"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <span className="text-[11px] font-mono font-bold text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-md border border-indigo-500/20">
+                        {asset.code}
+                      </span>
+                      <h4 className="text-sm font-bold text-white mt-1.5">{asset.name}</h4>
+                      <p className="text-xs text-slate-400">Loại: {asset.category}</p>
+                    </div>
+                    <StatusBadge status={asset.status} />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs text-slate-300 bg-slate-900/60 p-3 rounded-xl border border-slate-800/60">
+                    <div>
+                      <span className="text-[10px] text-slate-500 block">Nguyên giá:</span>
+                      <strong className="text-emerald-400">{formatVND(asset.value)}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-500 block">Ngày cấp:</span>
+                      <span>{asset.purchaseDate || 'Mới cấp'}</span>
+                    </div>
+                    {asset.serialNumber && (
+                      <div className="col-span-2">
+                        <span className="text-[10px] text-slate-500 block">S/N:</span>
+                        <span className="font-mono text-slate-300">{asset.serialNumber}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-800/60">
+                    <button
+                      onClick={() => {
+                        setSelectedAssetForReport(asset)
+                        setIsReportModalOpen(true)
+                      }}
+                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-750 text-rose-300 hover:text-rose-200 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                    >
+                      <Wrench className="w-3.5 h-3.5" />
+                      <span>Báo hỏng / Sự cố</span>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* VIEW 2: DAILY INSPECTION CHECKLIST FOR USER */}
+      {activeTab === 'inspection' && (
+        <div className="space-y-4 animate-in fade-in duration-200">
+          <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-sky-500/20 text-sky-300 border border-sky-500/30">
+                  Phân hệ Thực thi Ca trực
+                </span>
+                <span className="text-xs text-slate-400 font-mono">
+                  {new Date().toLocaleDateString('vi-VN', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' })}
+                </span>
+              </div>
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <ClipboardList className="w-5 h-5 text-sky-400" />
+                Nhiệm vụ Kiểm Tra Thiết Bị Ca Trực Hôm Nay
+              </h3>
+              <p className="text-xs text-slate-400">
+                Hãy kiểm tra tình trạng từng thiết bị và bấm chọn tình trạng tương ứng: <b>Tốt</b>, <b>Chập chờn</b> hoặc <b>Hư hỏng</b>.
               </p>
             </div>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {filteredAssets.map((asset) => (
-              <div
-                key={asset.id}
-                className="bg-slate-950/70 border border-slate-800 hover:border-slate-700 rounded-2xl p-5 space-y-4 transition-all hover:shadow-lg hover:shadow-indigo-500/5"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <span className="text-[11px] font-mono font-bold text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-md border border-indigo-500/20">
-                      {asset.code}
-                    </span>
-                    <h4 className="text-sm font-bold text-white mt-1.5">{asset.name}</h4>
-                    <p className="text-xs text-slate-400">Loại: {asset.category}</p>
-                  </div>
-                  <StatusBadge status={asset.status} />
-                </div>
 
-                <div className="grid grid-cols-2 gap-2 text-xs text-slate-300 bg-slate-900/60 p-3 rounded-xl border border-slate-800/60">
-                  <div>
-                    <span className="text-[10px] text-slate-500 block">Nguyên giá:</span>
-                    <strong className="text-emerald-400">{formatVND(asset.value)}</strong>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-slate-500 block">Ngày cấp:</span>
-                    <span>{asset.purchaseDate || 'Mới cấp'}</span>
-                  </div>
-                  {asset.serialNumber && (
-                    <div className="col-span-2">
-                      <span className="text-[10px] text-slate-500 block">S/N:</span>
-                      <span className="font-mono text-slate-300">{asset.serialNumber}</span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-800/60">
-                  <button
-                    onClick={() => {
-                      setSelectedAssetForReport(asset)
-                      setIsReportModalOpen(true)
-                    }}
-                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-750 text-rose-300 hover:text-rose-200 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors"
-                  >
-                    <Wrench className="w-3.5 h-3.5" />
-                    <span>Báo hỏng / Sự cố</span>
-                  </button>
-                </div>
+            {/* Quick status progress */}
+            <div className="flex items-center gap-3 bg-slate-950/80 p-3 rounded-2xl border border-slate-800 shrink-0">
+              <div className="text-right">
+                <p className="text-[11px] text-slate-400 font-medium">Tiến độ hôm nay</p>
+                <p className="text-sm font-bold text-sky-400 font-mono">
+                  {inspectionStats.checkedToday} / {inspectionStats.totalDevices} thiết bị ({inspectionStats.completionRate}%)
+                </p>
               </div>
-            ))}
+              <div className="w-10 h-10 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400 font-bold text-xs">
+                {inspectionStats.completionRate}%
+              </div>
+            </div>
           </div>
-        )}
-      </div>
+
+          {/* Reusable Daily Checklist Table */}
+          <DailyChecklistTable
+            devices={inspectableDevices}
+            currentUserName={displayName}
+            canDoInspection={true}
+            onQuickCheck={handleQuickCheck}
+            onViewHistory={(dev) => setHistoryViewingDevice(dev)}
+          />
+        </div>
+      )}
 
       {/* MODAL: REQUEST ASSET */}
       {isRequestModalOpen && (
@@ -477,6 +590,13 @@ export default function UserPortalPage() {
           </div>
         </div>
       )}
+
+      {/* MODAL: INSPECTION HISTORY */}
+      <InspectionHistoryModal
+        device={historyViewingDevice}
+        logs={inspectionLogs}
+        onClose={() => setHistoryViewingDevice(null)}
+      />
     </AppLayout>
   )
 }

@@ -494,6 +494,42 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                 <Wrench className="w-4 h-4 shrink-0 text-rose-400 transition-transform group-hover:scale-110" />
                 {!isCollapsed && <span className="truncate">Báo hỏng / Sự cố</span>}
               </button>
+
+              {!isCollapsed && (
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 px-3 pt-3 mb-2 border-t border-slate-800/60">
+                  Nhiệm vụ & Thực thi
+                </p>
+              )}
+
+              {/* Item: User Daily Inspection Checklist */}
+              <button
+                onClick={() => handleItemClick('user-inspection', '/user')}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-xs font-semibold transition-all group ${
+                  activeItem === 'user-inspection'
+                    ? 'bg-sky-600 text-white shadow-lg shadow-sky-600/30 font-bold'
+                    : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                } ${isCollapsed ? 'justify-center px-0' : ''}`}
+                title="Thực hiện kiểm tra & chấm checklist thiết bị hàng ngày"
+              >
+                <CheckSquare
+                  className={`w-4 h-4 shrink-0 transition-transform group-hover:scale-110 ${
+                    activeItem === 'user-inspection' ? 'text-white' : 'text-sky-400'
+                  }`}
+                />
+                {!isCollapsed && (
+                  <div className="flex-1 flex items-center justify-between min-w-0">
+                    <span className="truncate">Kiểm tra & Checklist</span>
+                    {typeof counts.inspectionUnchecked === 'number' && counts.inspectionUnchecked > 0 && (
+                      <span
+                        className="text-[10px] px-1.5 py-0.5 rounded-full font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                        title="Thiết bị cần kiểm tra hôm nay"
+                      >
+                        {counts.inspectionUnchecked} cần check
+                      </span>
+                    )}
+                  </div>
+                )}
+              </button>
             </div>
           )}
 

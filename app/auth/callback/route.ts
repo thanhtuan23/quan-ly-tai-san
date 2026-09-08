@@ -11,6 +11,9 @@ export async function GET(request: Request) {
     const { data, error } = await supabase.auth.exchangeCodeForSession(code)
 
     if (!error && data.user) {
+      if (next && next !== '/') {
+        return NextResponse.redirect(`${origin}${next}`)
+      }
       const role = data.user.user_metadata?.role || 'user'
       const destination = role === 'admin' ? '/admin' : '/user'
       return NextResponse.redirect(`${origin}${destination}`)
