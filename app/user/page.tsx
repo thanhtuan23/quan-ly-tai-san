@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/utils/supabase/client'
 import { Asset } from '../admin/types/asset'
@@ -9,7 +9,15 @@ import { formatVND } from '../admin/utils/formatters'
 import { AppLayout } from '../components/layout/AppLayout'
 import { DailyChecklistTable } from '../admin/components/DailyChecklistTable'
 import { InspectionHistoryModal } from '../admin/components/InspectionHistoryModal'
+import { HologramDashboard } from '../admin/components/HologramDashboard'
+import { AssetTable } from '../admin/components/AssetTable'
+import { WarrantyTable } from '../admin/components/WarrantyTable'
+import { UserTable } from '../admin/components/UserTable'
+import { AssetDetailModal } from '../admin/components/AssetDetailModal'
+import { WarrantyDetailModal } from '../admin/components/WarrantyDetailModal'
 import { useDailyInspection } from '../hooks/useDailyInspection'
+import { UserRole, UserModulePermissions, DEFAULT_PERMISSIONS_BY_ROLE, UserProfile, UserStatus } from '../admin/types/user'
+import { WarrantyReminder } from '../admin/types/warranty'
 import {
   Laptop,
   User,
@@ -22,25 +30,42 @@ import {
   Loader2,
   CheckSquare,
   AlertTriangle,
-  ClipboardList
+  ClipboardList,
+  BarChart3,
+  Users,
+  ShieldAlert
 } from 'lucide-react'
 
 export default function UserPortalPage() {
   const router = useRouter()
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
 
   const [currentUser, setCurrentUser] = useState<any>(null)
-  const [userRole, setUserRole] = useState<string>('user')
+  const [userRole, setUserRole] = useState<UserRole>('user')
   const [isAuthChecking, setIsAuthChecking] = useState(true)
   const [loading, setLoading] = useState(true)
   const [myAssets, setMyAssets] = useState<Asset[]>([])
+  const [allAssets, setAllAssets] = useState<Asset[]>([])
+  const [warrantyItems, setWarrantyItems] = useState<WarrantyReminder[]>([])
+  const [usersList, setUsersList] = useState<UserProfile[]>([])
   const [searchTerm, setSearchTerm] = useState('')
-  const [activeTab, setActiveTab] = useState<'my-assets' | 'inspection'>('my-assets')
+  const [activeTab, setActiveTab] = useState<'my-assets' | 'inspection' | 'reports' | 'assets' | 'warranty' | 'users'>('my-assets')
+  const [userPermissions, setUserPermissions] = useState<UserModulePermissions | null>(null)
+  const [enabledModules, setEnabledModules] = useState<Record<string, boolean>>({
+    inspection: true,
+    reports: true,
+    assets: true,
+    warranty: true,
+    users: true,
+    notifications: true
+  })
 
-  // Modals
+  // Modals & Detail views
   const [isRequestModalOpen, setIsRequestModalOpen] = useState(false)
   const [isReportModalOpen, setIsReportModalOpen] = useState(false)
   const [selectedAssetForReport, setSelectedAssetForReport] = useState<Asset | null>(null)
+  const [viewingAssetDetail, setViewingAssetDetail] = useState<Asset | null>(null)
+  const [viewingWarrantyDetail, setViewingWarrantyDetail] = useState<WarrantyReminder | null>(null)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
 
   // Request form state
@@ -55,6 +80,80 @@ export default function UserPortalPage() {
     setTimeout(() => setToastMessage(null), 3000)
   }
 
+  // Calculate effective permissions
+  const effectivePermissions: UserModulePermissions = useMemo(() => {
+    const roleDefault = DEFAULT_PERMISSIONS_BY_ROLE[userRole] || DEFAULT_PERMISSIONS_BY_ROLE.user
+    return {
+      ...roleDefault,
+      ...(userPermissions || {})
+    }
+  }, [userRole, userPermissions])
+
+  // Permission flags based on global module switches + user permissions
+  const canSeeInspection =
+    enabledModules.inspection !== false && effectivePermissions.canDoInspection === true
+  const canSeeReports =
+    enabledModules.reports !== false && effectivePermissions.canViewReports === true
+  const canSeeAllAssets =
+    enabledModules.assets !== false && (effectivePermissions.canEditAssets === true || userRole === 'manager')
+  const canSeeWarranty =
+    enabledModules.warranty !== false && (effectivePermissions.canViewWarranty === true || effectivePermissions.canEditWarranty === true)
+  const canSeeUsers =
+    enabledModules.users !== false && effectivePermissions.canManageUsers === true
+
+  // Load Module Settings from DB (admin row) + localStorage + listen to Realtime broadcast
+  useEffect(() => {
+    const applySettings = (parsed: any) => {
+      if (parsed?.modules) {
+        setEnabledModules((prev) => ({ ...prev, ...parsed.modules }))
+        try {
+          localStorage.setItem('qlts_module_settings', JSON.stringify(parsed))
+        } catch { /* ignore */ }
+      }
+    }
+
+    // 1. Đọc cache localStorage
+    try {
+      const saved = localStorage.getItem('qlts_module_settings')
+      if (saved) applySettings(JSON.parse(saved))
+    } catch { /* ignore */ }
+
+    // 2. Fetch system module settings từ database profiles table (row role admin)
+    const fetchSystemSettings = async () => {
+      try {
+        const { data } = await supabase
+          .from('profiles')
+          .select('permissions')
+          .eq('role', 'admin')
+          .order('updated_at', { ascending: false })
+          .limit(1)
+
+        if (data && data.length > 0) {
+          const p = data[0].permissions as any
+          if (p?._system_modules) {
+            applySettings({ modules: p._system_modules })
+          }
+        }
+      } catch (e) {
+        console.warn('Cannot fetch system module settings:', e)
+      }
+    }
+    fetchSystemSettings()
+
+    // 3. Subscribe Realtime broadcast để nhận module settings từ Admin (mọi thiết bị)
+    const ch = supabase
+      .channel('system:module_settings')
+      .on('broadcast', { event: 'module_settings_changed' }, ({ payload }: { payload: any }) => {
+        console.log('[User] Module settings changed by Admin:', payload)
+        applySettings(payload)
+      })
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(ch)
+    }
+  }, [supabase])
+
   const displayName = currentUser?.user_metadata?.full_name || currentUser?.email?.split('@')[0] || 'Thành viên'
   const displayEmail = currentUser?.email || 'user@company.com'
   const department = currentUser?.user_metadata?.department || 'Phòng IT & Công nghệ'
@@ -64,7 +163,6 @@ export default function UserPortalPage() {
     inspectableDevices,
     inspectionLogs,
     stats: inspectionStats,
-    loading: loadingInspection,
     historyViewingDevice,
     setHistoryViewingDevice,
     fetchData: fetchInspectionData,
@@ -77,7 +175,7 @@ export default function UserPortalPage() {
     onShowToast: showToast
   })
 
-  // Check auth and fetch user's assigned assets
+  // Check auth and fetch user profile + assigned assets
   const checkAuthAndFetchAssets = useCallback(async () => {
     try {
       setLoading(true)
@@ -86,71 +184,74 @@ export default function UserPortalPage() {
       if (authError || !user) {
         router.push('/auth/login')
         return
-      } else {
-        let role = user.user_metadata?.role || 'user'
-        let fullName = user.user_metadata?.full_name || ''
-        let dept = user.user_metadata?.department || 'Phòng ban'
+      }
 
-        // Fetch from database profiles table
-        try {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('role, full_name, department, status')
-            .eq('id', user.id)
-            .single()
+      let role = (user.user_metadata?.role as UserRole) || 'user'
+      let fullName = user.user_metadata?.full_name || ''
+      let dept = user.user_metadata?.department || 'Phòng ban'
 
-          if (profile) {
-            if (profile.status && profile.status !== 'active') {
-              await supabase.auth.signOut()
-              router.push('/auth/login')
-              return
-            }
-            if (profile.role) role = profile.role
-            if (profile.full_name) fullName = profile.full_name
-            if (profile.department) dept = profile.department
+      // Fetch from database profiles table (role, permissions, etc.)
+      try {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role, full_name, department, status, permissions')
+          .eq('id', user.id)
+          .single()
+
+        if (profile) {
+          if (profile.status && profile.status !== 'active') {
+            await supabase.auth.signOut()
+            router.push('/auth/login')
+            return
           }
-        } catch (e) {
-          console.warn('Cannot fetch profile:', e)
-        }
-
-        setCurrentUser({
-          ...user,
-          user_metadata: {
-            ...user.user_metadata,
-            full_name: fullName,
-            role: role,
-            department: dept
+          if (profile.role) role = profile.role as UserRole
+          if (profile.full_name) fullName = profile.full_name
+          if (profile.department) dept = profile.department
+          if (profile.permissions) {
+            setUserPermissions(profile.permissions)
           }
-        })
-        setUserRole(role)
-
-        // Fetch assets assigned to this user (by email or full_name)
-        const userName = fullName || user.email?.split('@')[0] || ''
-        const userEmail = user.email || ''
-
-        const { data, error } = await supabase
-          .from('assets')
-          .select('*')
-          .or(`assignee.ilike.%${userName}%,assignee.ilike.%${userEmail}%`)
-
-        if (data && !error) {
-          setMyAssets(
-            data.map((row: any) => ({
-              id: String(row.id),
-              code: row.code || 'TS-UNKNOWN',
-              name: row.name || 'Tài sản',
-              category: row.category || 'IT',
-              status: row.status || 'Đang sử dụng',
-              assignee: row.assignee || userName,
-              department: row.department || 'Phòng ban',
-              value: Number(row.value) || 0,
-              purchaseDate: row.purchase_date || row.purchaseDate || '',
-              location: row.location || 'Văn phòng',
-              serialNumber: row.serial_number || row.serialNumber || '',
-              notes: row.notes || ''
-            }))
-          )
         }
+      } catch (e) {
+        console.warn('Cannot fetch profile:', e)
+      }
+
+      setCurrentUser({
+        ...user,
+        user_metadata: {
+          ...user.user_metadata,
+          full_name: fullName,
+          role: role,
+          department: dept
+        }
+      })
+      setUserRole(role)
+
+      // Fetch assets assigned to this user
+      const userName = fullName || user.email?.split('@')[0] || ''
+      const userEmail = user.email || ''
+
+      const { data, error } = await supabase
+        .from('assets')
+        .select('*')
+        .or(`assignee.ilike.%${userName}%,assignee.ilike.%${userEmail}%`)
+
+      if (data && !error) {
+        setMyAssets(
+          data.map((row: any) => ({
+            id: String(row.id),
+            code: row.code || 'TS-UNKNOWN',
+            name: row.name || 'Tài sản',
+            category: row.category || 'IT',
+            status: row.status || 'Đang sử dụng',
+            assignee: row.assignee || userName,
+            department: row.department || 'Phòng ban',
+            value: Number(row.value) || 0,
+            purchaseDate: row.purchase_date || row.purchaseDate || '',
+            location: row.location || 'Văn phòng',
+            serialNumber: row.serial_number || row.serialNumber || '',
+            notes: row.notes || ''
+          }))
+        )
       }
     } catch (err) {
       console.error('Error in user portal:', err)
@@ -161,10 +262,125 @@ export default function UserPortalPage() {
     }
   }, [router, supabase])
 
+  // Listen to realtime user permission updates
+  useEffect(() => {
+    if (!currentUser?.id) return
+
+    // 1. Channel broadcast for permission changes
+    const userChannel = supabase
+      .channel(`user:permissions:${currentUser.id}`)
+      .on('broadcast', { event: 'permissions_updated' }, ({ payload }: { payload: any }) => {
+        console.log('[User] Permissions updated via Realtime broadcast:', payload)
+        if (payload?.permissions) setUserPermissions(payload.permissions)
+        if (payload?.role) setUserRole(payload.role)
+        showToast('Quyền hạn tài khoản của bạn vừa được Quản trị viên cập nhật!')
+      })
+      .subscribe()
+
+    // 2. Postgres realtime change on profiles
+    const profileSub = supabase
+      .channel(`db:profile:${currentUser.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${currentUser.id}` },
+        (payload: any) => {
+          console.log('[User] Profile updated in DB:', payload.new)
+          if (payload.new?.permissions) setUserPermissions(payload.new.permissions)
+          if (payload.new?.role) setUserRole(payload.new.role)
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(userChannel)
+      supabase.removeChannel(profileSub)
+    }
+  }, [currentUser?.id, supabase])
+
   useEffect(() => {
     checkAuthAndFetchAssets()
     fetchInspectionData()
   }, [checkAuthAndFetchAssets, fetchInspectionData])
+
+  // Fetch additional data when delegated modules are enabled
+  useEffect(() => {
+    if (canSeeAllAssets || canSeeReports) {
+      supabase.from('assets').select('*').then(({ data }: { data: any }) => {
+        if (data) {
+          setAllAssets(
+            data.map((row: any) => ({
+              id: String(row.id),
+              code: row.code || 'TS-UNKNOWN',
+              name: row.name || 'Tài sản',
+              model: row.model || '',
+              category: row.category || 'IT',
+              status: row.status || 'Đang sử dụng',
+              assignee: row.assignee || 'Chưa cấp phát',
+              department: row.department || 'Phòng ban',
+              value: Number(row.value) || 0,
+              purchaseDate: row.purchase_date || '',
+              warrantyYears: Number(row.warranty_years) || 2,
+              location: row.location || 'Văn phòng',
+              serialNumber: row.serial_number || '',
+              notes: row.notes || ''
+            }))
+          )
+        }
+      })
+    }
+
+    if (canSeeWarranty || canSeeReports) {
+      supabase.from('warranty_reminders').select('*').then(({ data }: { data: any }) => {
+        if (data) {
+          setWarrantyItems(
+            data.map((row: any) => ({
+              id: String(row.id),
+              assetCode: row.asset_code || '',
+              assetName: row.asset_name || '',
+              supplier: row.supplier || '',
+              location: row.location || '',
+              sentDate: row.sent_date || '',
+              expectedReturnDate: row.expected_return_date || '',
+              returnedDate: row.returned_date || '',
+              status: row.status || 'dang_bao_hanh',
+              issueDescription: row.issue_description || '',
+              cost: Number(row.cost) || 0,
+              handler: row.handler || '',
+              notes: row.notes || ''
+            }))
+          )
+        }
+      })
+    }
+
+    if (canSeeUsers) {
+      supabase.from('profiles').select('*').then(({ data }: { data: any }) => {
+        if (data) {
+          setUsersList(
+            data.map((row: any) => ({
+              id: row.id,
+              email: row.email || '',
+              fullName: row.full_name || '',
+              role: row.role || 'user',
+              department: row.department || '',
+              avatarUrl: row.avatar_url,
+              status: row.status || 'active',
+              permissions: row.permissions
+            }))
+          )
+        }
+      })
+    }
+  }, [canSeeAllAssets, canSeeReports, canSeeWarranty, canSeeUsers, supabase])
+
+  // Auto-switch activeTab nếu module/quyền bị tắt sau khi đã vào tab
+  useEffect(() => {
+    if (activeTab === 'inspection' && !canSeeInspection) setActiveTab('my-assets')
+    if (activeTab === 'reports' && !canSeeReports) setActiveTab('my-assets')
+    if (activeTab === 'assets' && !canSeeAllAssets) setActiveTab('my-assets')
+    if (activeTab === 'warranty' && !canSeeWarranty) setActiveTab('my-assets')
+    if (activeTab === 'users' && !canSeeUsers) setActiveTab('my-assets')
+  }, [activeTab, canSeeInspection, canSeeReports, canSeeAllAssets, canSeeWarranty, canSeeUsers])
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -194,10 +410,17 @@ export default function UserPortalPage() {
     setSelectedAssetForReport(null)
   }
 
-  const filteredAssets = myAssets.filter(
+  const filteredMyAssets = myAssets.filter(
     (a) =>
       a.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       a.code.toLowerCase().includes(searchTerm.toLowerCase())
+  )
+
+  const filteredAllAssets = allAssets.filter(
+    (a) =>
+      a.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      a.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      a.assignee.toLowerCase().includes(searchTerm.toLowerCase())
   )
 
   const actionsSlot = (
@@ -227,10 +450,20 @@ export default function UserPortalPage() {
   return (
     <AppLayout
       currentPortal="user"
-      activeItem={activeTab === 'my-assets' ? 'my-assets' : 'user-inspection'}
+      activeItem={
+        activeTab === 'my-assets'
+          ? 'my-assets'
+          : activeTab === 'inspection'
+          ? 'user-inspection'
+          : activeTab
+      }
       onSelectNavItem={(item) => {
         if (item === 'my-assets') setActiveTab('my-assets')
         if (item === 'user-inspection') setActiveTab('inspection')
+        if (item === 'reports') setActiveTab('reports')
+        if (item === 'assets') setActiveTab('assets')
+        if (item === 'warranty') setActiveTab('warranty')
+        if (item === 'users') setActiveTab('users')
         if (item === 'request-modal') setIsRequestModalOpen(true)
         if (item === 'report-modal') {
           if (myAssets.length > 0) {
@@ -239,24 +472,59 @@ export default function UserPortalPage() {
           setIsReportModalOpen(true)
         }
       }}
-      title={activeTab === 'my-assets' ? "Cổng Thông Tin Tài Sản Cá Nhân" : "Kiểm Tra & Checklist Thiết Bị Hàng Ngày"}
-      subtitle={activeTab === 'my-assets' ? "Theo dõi và quản lý các trang thiết bị công ty đã cấp phát cho bạn" : "Thực hiện chấm checklist kiểm tra tình trạng máy móc thiết bị theo ca trực"}
+      title={
+        activeTab === 'my-assets'
+          ? 'Cổng Thông Tin Tài Sản Cá Nhân'
+          : activeTab === 'inspection'
+          ? 'Kiểm Tra & Checklist Thiết Bị Hàng Ngày'
+          : activeTab === 'reports'
+          ? 'Dashboard & Báo Cáo Phân Tích'
+          : activeTab === 'assets'
+          ? 'Danh Mục Tài Sản Toàn Công Ty'
+          : activeTab === 'warranty'
+          ? 'Nhắc Việc & Tiến Độ Bảo Hành'
+          : 'Quản Trị Người Dùng & Phân Quyền'
+      }
+      subtitle={
+        activeTab === 'my-assets'
+          ? 'Theo dõi và quản lý các trang thiết bị công ty đã cấp phát cho bạn'
+          : activeTab === 'inspection'
+          ? 'Thực hiện chấm checklist kiểm tra tình trạng máy móc thiết bị theo ca trực'
+          : activeTab === 'reports'
+          ? 'Biểu đồ trực quan và phân tích khấu hao thiết bị'
+          : activeTab === 'assets'
+          ? 'Tra cứu và quản lý toàn bộ danh mục tài sản'
+          : activeTab === 'warranty'
+          ? 'Theo dõi thiết bị gửi bảo hành nhà phân phối'
+          : 'Danh sách tài khoản và phân quyền thành viên'
+      }
       searchTerm={searchTerm}
       onSearchChange={setSearchTerm}
-      searchPlaceholder={activeTab === 'my-assets' ? "Tìm kiếm tài sản theo tên, mã TS..." : "Tìm kiếm thiết bị cần kiểm tra..."}
+      searchPlaceholder={
+        activeTab === 'my-assets'
+          ? 'Tìm kiếm tài sản theo tên, mã TS...'
+          : activeTab === 'inspection'
+          ? 'Tìm kiếm thiết bị cần kiểm tra...'
+          : 'Tìm kiếm dữ liệu...'
+      }
       actionsSlot={actionsSlot}
       currentUser={
         currentUser
           ? {
-            email: displayEmail,
-            full_name: displayName,
-            role: userRole as any,
-            department: currentUser.user_metadata?.department
-          }
+              email: displayEmail,
+              full_name: displayName,
+              role: userRole,
+              department: currentUser.user_metadata?.department,
+              permissions: effectivePermissions
+            }
           : null
       }
+      enabledModules={enabledModules}
       counts={{
         myAssets: myAssets.length,
+        assets: allAssets.length,
+        warranty: warrantyItems.length,
+        users: usersList.length,
         inspectionUnchecked: inspectionStats.uncheckedToday,
         inspectionAlerts: inspectionStats.unstableCount + inspectionStats.damagedCount
       }}
@@ -274,11 +542,11 @@ export default function UserPortalPage() {
       <div className="bg-gradient-to-r from-blue-900/40 via-indigo-900/30 to-slate-900 border border-blue-500/20 rounded-3xl p-6 relative overflow-hidden flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl">
         <div className="space-y-1">
           <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 text-[11px] font-semibold mb-1">
-            <User className="w-3 h-3" /> Tài khoản Nhân viên (User)
+            <User className="w-3 h-3" /> Tài khoản: <span className="uppercase font-bold">{userRole}</span>
           </div>
           <h2 className="text-xl font-bold text-white">Xin chào, {displayName}!</h2>
           <p className="text-xs text-slate-300 max-w-xl leading-relaxed">
-            Đây là trang theo dõi các trang thiết bị, máy móc công ty đã cấp phát cho bạn. Bạn có thể gửi đề xuất mượn mới hoặc báo cáo sự cố khi thiết bị hư hỏng.
+            Hệ thống quản lý tài sản và phân hệ công việc cá nhân. Các tính năng bạn nhìn thấy được cấu hình trực tiếp từ Quản trị viên hệ thống.
           </p>
         </div>
 
@@ -294,10 +562,10 @@ export default function UserPortalPage() {
       </div>
 
       {/* Tab Navigation Switches */}
-      <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+      <div className="flex items-center gap-2 border-b border-slate-800 pb-3 overflow-x-auto">
         <button
           onClick={() => setActiveTab('my-assets')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 ${
             activeTab === 'my-assets'
               ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
               : 'bg-slate-900/60 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
@@ -307,22 +575,80 @@ export default function UserPortalPage() {
           <span>Tài sản của tôi ({myAssets.length})</span>
         </button>
 
-        <button
-          onClick={() => setActiveTab('inspection')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-            activeTab === 'inspection'
-              ? 'bg-sky-600 text-white shadow-lg shadow-sky-600/30'
-              : 'bg-slate-900/60 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
-          }`}
-        >
-          <CheckSquare className="w-4 h-4" />
-          <span>Nhiệm vụ Kiểm Tra & Checklist</span>
-          {inspectionStats.uncheckedToday > 0 && (
-            <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-amber-500/20 text-amber-300 font-mono">
-              {inspectionStats.uncheckedToday} cần làm
-            </span>
-          )}
-        </button>
+        {canSeeInspection && (
+          <button
+            onClick={() => setActiveTab('inspection')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 ${
+              activeTab === 'inspection'
+                ? 'bg-sky-600 text-white shadow-lg shadow-sky-600/30'
+                : 'bg-slate-900/60 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
+            }`}
+          >
+            <CheckSquare className="w-4 h-4" />
+            <span>Nhiệm vụ Kiểm Tra & Checklist</span>
+            {inspectionStats.uncheckedToday > 0 && (
+              <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-amber-500/20 text-amber-300 font-mono">
+                {inspectionStats.uncheckedToday} cần làm
+              </span>
+            )}
+          </button>
+        )}
+
+        {canSeeReports && (
+          <button
+            onClick={() => setActiveTab('reports')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 ${
+              activeTab === 'reports'
+                ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/30'
+                : 'bg-slate-900/60 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
+            }`}
+          >
+            <BarChart3 className="w-4 h-4" />
+            <span>Dashboard & Báo Cáo</span>
+          </button>
+        )}
+
+        {canSeeAllAssets && (
+          <button
+            onClick={() => setActiveTab('assets')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 ${
+              activeTab === 'assets'
+                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
+                : 'bg-slate-900/60 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
+            }`}
+          >
+            <Laptop className="w-4 h-4" />
+            <span>Danh Mục Tài Sản ({allAssets.length})</span>
+          </button>
+        )}
+
+        {canSeeWarranty && (
+          <button
+            onClick={() => setActiveTab('warranty')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 ${
+              activeTab === 'warranty'
+                ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/30'
+                : 'bg-slate-900/60 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
+            }`}
+          >
+            <AlertTriangle className="w-4 h-4" />
+            <span>Nhắc Việc Bảo Hành ({warrantyItems.length})</span>
+          </button>
+        )}
+
+        {canSeeUsers && (
+          <button
+            onClick={() => setActiveTab('users')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all shrink-0 ${
+              activeTab === 'users'
+                ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/30'
+                : 'bg-slate-900/60 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            <span>Quản Trị Người Dùng ({usersList.length})</span>
+          </button>
+        )}
       </div>
 
       {/* VIEW 1: MY ASSETS LIST */}
@@ -349,7 +675,7 @@ export default function UserPortalPage() {
             </div>
           </div>
 
-          {filteredAssets.length === 0 ? (
+          {filteredMyAssets.length === 0 ? (
             <div className="py-12 text-center text-slate-500 space-y-3">
               <div className="w-12 h-12 rounded-2xl bg-slate-800/80 flex items-center justify-center mx-auto text-slate-400">
                 <Laptop className="w-6 h-6" />
@@ -363,7 +689,7 @@ export default function UserPortalPage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {filteredAssets.map((asset) => (
+              {filteredMyAssets.map((asset) => (
                 <div
                   key={asset.id}
                   className="bg-slate-950/70 border border-slate-800 hover:border-slate-700 rounded-2xl p-5 space-y-4 transition-all hover:shadow-lg hover:shadow-indigo-500/5"
@@ -380,10 +706,12 @@ export default function UserPortalPage() {
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 text-xs text-slate-300 bg-slate-900/60 p-3 rounded-xl border border-slate-800/60">
-                    <div>
-                      <span className="text-[10px] text-slate-500 block">Nguyên giá:</span>
-                      <strong className="text-emerald-400">{formatVND(asset.value)}</strong>
-                    </div>
+                    {effectivePermissions.canViewPrice && (
+                      <div>
+                        <span className="text-[10px] text-slate-500 block">Nguyên giá:</span>
+                        <strong className="text-emerald-400">{formatVND(asset.value)}</strong>
+                      </div>
+                    )}
                     <div>
                       <span className="text-[10px] text-slate-500 block">Ngày cấp:</span>
                       <span>{asset.purchaseDate || 'Mới cấp'}</span>
@@ -415,8 +743,8 @@ export default function UserPortalPage() {
         </div>
       )}
 
-      {/* VIEW 2: DAILY INSPECTION CHECKLIST FOR USER */}
-      {activeTab === 'inspection' && (
+      {/* VIEW 2: DAILY INSPECTION CHECKLIST */}
+      {activeTab === 'inspection' && canSeeInspection && (
         <div className="space-y-4 animate-in fade-in duration-200">
           <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl">
             <div className="space-y-1">
@@ -437,7 +765,6 @@ export default function UserPortalPage() {
               </p>
             </div>
 
-            {/* Quick status progress */}
             <div className="flex items-center gap-3 bg-slate-950/80 p-3 rounded-2xl border border-slate-800 shrink-0">
               <div className="text-right">
                 <p className="text-[11px] text-slate-400 font-medium">Tiến độ hôm nay</p>
@@ -451,7 +778,6 @@ export default function UserPortalPage() {
             </div>
           </div>
 
-          {/* Reusable Daily Checklist Table */}
           <DailyChecklistTable
             devices={inspectableDevices}
             currentUserName={displayName}
@@ -459,6 +785,97 @@ export default function UserPortalPage() {
             onQuickCheck={handleQuickCheck}
             onViewHistory={(dev) => setHistoryViewingDevice(dev)}
           />
+        </div>
+      )}
+
+      {/* VIEW 3: HOLOGRAM DASHBOARD & REPORTS (DELEGATED) */}
+      {activeTab === 'reports' && canSeeReports && (
+        <div className="space-y-4 animate-in fade-in duration-200">
+          <HologramDashboard
+            devices={inspectableDevices}
+            inspectionLogs={inspectionLogs}
+            warrantyItems={warrantyItems}
+            assets={allAssets.length > 0 ? allAssets : myAssets}
+            canViewPrice={effectivePermissions.canViewPrice}
+            onNavigateToInspection={() => {
+              if (canSeeInspection) setActiveTab('inspection')
+            }}
+            onNavigateToWarranty={() => {
+              if (canSeeWarranty) setActiveTab('warranty')
+            }}
+          />
+        </div>
+      )}
+
+      {/* VIEW 4: ALL ASSETS MANAGEMENT (DELEGATED) */}
+      {activeTab === 'assets' && canSeeAllAssets && (
+        <div className="space-y-4 animate-in fade-in duration-200">
+          <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 space-y-4 shadow-xl">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <Laptop className="w-5 h-5 text-indigo-400" />
+                  Danh Mục Tài Sản Toàn Công Ty ({allAssets.length})
+                </h3>
+                <p className="text-xs text-slate-400">Bạn đã được cấp quyền tra cứu danh mục thiết bị của công ty</p>
+              </div>
+            </div>
+
+            <AssetTable
+              assets={filteredAllAssets}
+              onView={(a) => setViewingAssetDetail(a)}
+              onEdit={(a) => setViewingAssetDetail(a)}
+              onDelete={() => {}}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* VIEW 5: WARRANTY REMINDERS (DELEGATED) */}
+      {activeTab === 'warranty' && canSeeWarranty && (
+        <div className="space-y-4 animate-in fade-in duration-200">
+          <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 space-y-4 shadow-xl">
+            <div>
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-amber-400" />
+                Danh Sách Thiết Bị Đang Bảo Hành ({warrantyItems.length})
+              </h3>
+              <p className="text-xs text-slate-400">Theo dõi tiến độ sửa chữa thiết bị gửi tại nhà phân phối</p>
+            </div>
+
+            <WarrantyTable
+              items={warrantyItems}
+              warningThreshold={7}
+              overdueThreshold={10}
+              onView={(w) => setViewingWarrantyDetail(w)}
+              onEdit={(w) => setViewingWarrantyDetail(w)}
+              onDelete={() => {}}
+              onQuickComplete={() => {}}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* VIEW 6: USERS (DELEGATED) */}
+      {activeTab === 'users' && canSeeUsers && (
+        <div className="space-y-4 animate-in fade-in duration-200">
+          <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 space-y-4 shadow-xl">
+            <div>
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <Users className="w-5 h-5 text-emerald-400" />
+                Danh Sách Thành Viên & Người Dùng ({usersList.length})
+              </h3>
+              <p className="text-xs text-slate-400">Tài khoản và quyền hạn nhân sự</p>
+            </div>
+
+            <UserTable
+              users={usersList}
+              currentAdminEmail={displayEmail}
+              onEdit={() => {}}
+              onToggleStatus={() => {}}
+              onDelete={() => {}}
+            />
+          </div>
         </div>
       )}
 
@@ -597,6 +1014,22 @@ export default function UserPortalPage() {
         logs={inspectionLogs}
         onClose={() => setHistoryViewingDevice(null)}
       />
+
+      {/* MODAL: ASSET DETAIL */}
+      {viewingAssetDetail && (
+        <AssetDetailModal
+          asset={viewingAssetDetail}
+          onClose={() => setViewingAssetDetail(null)}
+        />
+      )}
+
+      {/* MODAL: WARRANTY DETAIL */}
+      {viewingWarrantyDetail && (
+        <WarrantyDetailModal
+          item={viewingWarrantyDetail}
+          onClose={() => setViewingWarrantyDetail(null)}
+        />
+      )}
     </AppLayout>
   )
 }

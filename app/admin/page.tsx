@@ -132,8 +132,9 @@ export default function AdminPage() {
 
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], [])
 
-  // Load Module Settings from localStorage
+  // Load Module Settings from DB (profiles admin row) & localStorage
   useEffect(() => {
+    // 1. Load from localStorage cache
     try {
       const saved = localStorage.getItem('qlts_module_settings')
       if (saved) {
@@ -148,15 +149,105 @@ export default function AdminPage() {
     } catch {
       // Ignore JSON parse error
     }
-  }, [])
 
-  const handleSaveModuleSettings = (newSettings: ModuleSettings) => {
+    // 2. Fetch from Supabase profiles table (admin system settings)
+    const fetchSystemSettings = async () => {
+      try {
+        const { data } = await supabase
+          .from('profiles')
+          .select('permissions')
+          .eq('role', 'admin')
+          .order('updated_at', { ascending: false })
+          .limit(1)
+
+        if (data && data.length > 0) {
+          const p = data[0].permissions as any
+          if (p?._system_modules) {
+            setModuleSettings((prev) => {
+              const updated = {
+                ...prev,
+                modules: { ...prev.modules, ...p._system_modules },
+                warningThresholdDays: p._system_warningThresholdDays || prev.warningThresholdDays,
+                overdueThresholdDays: p._system_overdueThresholdDays || prev.overdueThresholdDays,
+                telegram: p._system_telegram ? { ...prev.telegram, ...p._system_telegram } : prev.telegram
+              }
+              try {
+                localStorage.setItem('qlts_module_settings', JSON.stringify(updated))
+              } catch {}
+              return updated
+            })
+          }
+        }
+      } catch (err) {
+        console.warn('Cannot fetch system module settings:', err)
+      }
+    }
+
+    fetchSystemSettings()
+  }, [supabase])
+
+  const broadcastModuleSettings = async (settings: ModuleSettings) => {
+    try {
+      // Broadcast qua Realtime để sync với tất cả User sessions (mọi thiết bị)
+      const broadcastCh = supabase.channel('system:module_settings')
+      broadcastCh.subscribe((status: string) => {
+        if (status === 'SUBSCRIBED') {
+          broadcastCh.send({
+            type: 'broadcast',
+            event: 'module_settings_changed',
+            payload: {
+              modules: settings.modules,
+              warningThresholdDays: settings.warningThresholdDays,
+              overdueThresholdDays: settings.overdueThresholdDays,
+              telegram: settings.telegram
+            }
+          })
+        }
+      })
+    } catch {
+      // Broadcast không bắt buộc, bỏ qua lỗi
+    }
+  }
+
+  const handleSaveModuleSettings = async (newSettings: ModuleSettings) => {
     setModuleSettings(newSettings)
     try {
       localStorage.setItem('qlts_module_settings', JSON.stringify(newSettings))
     } catch {
       // Ignore storage error
     }
+
+    // Lưu vào database trong profile admin để tất cả máy tính / user đều load được
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { data: curProf } = await supabase
+          .from('profiles')
+          .select('permissions')
+          .eq('id', user.id)
+          .single()
+
+        const updatedPerms = {
+          ...(curProf?.permissions || {}),
+          _system_modules: newSettings.modules,
+          _system_telegram: newSettings.telegram,
+          _system_warningThresholdDays: newSettings.warningThresholdDays,
+          _system_overdueThresholdDays: newSettings.overdueThresholdDays
+        }
+
+        await supabase
+          .from('profiles')
+          .update({
+            permissions: updatedPerms,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', user.id)
+      }
+    } catch (e) {
+      console.warn('Failed to persist system settings to DB:', e)
+    }
+
+    broadcastModuleSettings(newSettings)
     showToast('Đã lưu cấu hình Module và quy tắc cảnh báo!')
 
     if (!newSettings.modules[activeView]) {
@@ -167,7 +258,7 @@ export default function AdminPage() {
     }
   }
 
-  const handleSaveTelegramSettings = (newTelegram: TelegramNotificationSettings) => {
+  const handleSaveTelegramSettings = async (newTelegram: TelegramNotificationSettings) => {
     const updated = { ...moduleSettings, telegram: newTelegram }
     setModuleSettings(updated)
     try {
@@ -175,6 +266,38 @@ export default function AdminPage() {
     } catch {
       // Ignore
     }
+
+    // Lưu vào database trong profile admin
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { data: curProf } = await supabase
+          .from('profiles')
+          .select('permissions')
+          .eq('id', user.id)
+          .single()
+
+        const updatedPerms = {
+          ...(curProf?.permissions || {}),
+          _system_modules: updated.modules,
+          _system_telegram: updated.telegram,
+          _system_warningThresholdDays: updated.warningThresholdDays,
+          _system_overdueThresholdDays: updated.overdueThresholdDays
+        }
+
+        await supabase
+          .from('profiles')
+          .update({
+            permissions: updatedPerms,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', user.id)
+      }
+    } catch (e) {
+      console.warn('Failed to persist telegram settings to DB:', e)
+    }
+
+    broadcastModuleSettings(updated)
     showToast('Đã lưu cấu hình Telegram Bot API!')
   }
 
@@ -870,7 +993,8 @@ export default function AdminPage() {
       .update({
         role: newRole,
         custom_role: newRole,
-        permissions: newPermissions
+        permissions: newPermissions,
+        updated_at: new Date().toISOString()
       })
       .eq('id', userId)
 
@@ -880,6 +1004,22 @@ export default function AdminPage() {
 
     if (currentUser?.id === userId) {
       setCurrentUser((prev) => (prev ? { ...prev, role: newRole, permissions: newPermissions } : null))
+    }
+
+    // Broadcast permission change realtime tới session của user đang online
+    try {
+      const userCh = supabase.channel(`user:permissions:${userId}`)
+      userCh.subscribe((status: string) => {
+        if (status === 'SUBSCRIBED') {
+          userCh.send({
+            type: 'broadcast',
+            event: 'permissions_updated',
+            payload: { userId, role: newRole, permissions: newPermissions }
+          })
+        }
+      })
+    } catch {
+      // Ignore broadcast errors
     }
 
     showToast(`Đã lưu ma trận phân quyền chi tiết cho người dùng!`)
@@ -1488,11 +1628,16 @@ export default function AdminPage() {
         onClose={() => setIsUserModalOpen(false)}
         onSave={async (formData) => {
           if (formData.id) {
+            // Khi update role, cũng cập nhật custom_role và permissions mặc định theo role mới
+            const rolePerms = DEFAULT_PERMISSIONS_BY_ROLE[formData.role as UserRole] || DEFAULT_PERMISSIONS_BY_ROLE.user
             await supabase.from('profiles').update({
               full_name: formData.fullName,
               role: formData.role,
+              custom_role: formData.role,
               department: formData.department,
-              status: formData.status
+              status: formData.status,
+              // Chỉ reset permissions nếu không có override custom (để bảo toàn quyền đã phân công)
+              permissions: rolePerms
             }).eq('id', formData.id)
             fetchUsers()
             showToast(`Cập nhật thành công ${formData.email}`)

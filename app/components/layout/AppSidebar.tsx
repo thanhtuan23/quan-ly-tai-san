@@ -2,7 +2,7 @@
 
 import React from 'react'
 import { useRouter } from 'next/navigation'
-import { UserRole, UserModulePermissions } from '../../admin/types/user'
+import { UserRole, UserModulePermissions, DEFAULT_PERMISSIONS_BY_ROLE } from '../../admin/types/user'
 import {
   Building2,
   Laptop,
@@ -115,17 +115,38 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
     }
   }
 
-  // Permission checks (defaults to true for admin/manager if undefined)
-  const canSeeInspection =
-    enabledModules.inspection !== false && (isAdmin || isManager || (permissions ? permissions.canViewInspection : true))
-  const canSeeReports =
-    enabledModules.reports !== false && (isAdmin || isManager || Boolean(permissions?.canViewReports))
-  const canSeeAssets =
-    enabledModules.assets !== false && (isAdmin || isManager || (permissions ? permissions.canViewAssets : true))
-  const canSeeWarranty =
-    enabledModules.warranty !== false && (isAdmin || isManager || (permissions ? permissions.canViewWarranty : true))
-  const canSeeUsers =
-    enabledModules.users !== false && (isAdmin || Boolean(permissions?.canManageUsers))
+  // Effective permissions: dùng DB permissions nếu có, fallback về default theo role
+  const effectivePermissions: UserModulePermissions = {
+    ...(DEFAULT_PERMISSIONS_BY_ROLE[userRole as UserRole] || DEFAULT_PERMISSIONS_BY_ROLE.user),
+    ...(permissions || {})
+  }
+
+  // Permission checks:
+  // Admin Portal checks:
+  const canSeeAdminInspection =
+    enabledModules.inspection !== false && (isAdmin || isManager || effectivePermissions.canViewInspection)
+  const canSeeAdminReports =
+    enabledModules.reports !== false && (isAdmin || isManager || effectivePermissions.canViewReports)
+  const canSeeAdminAssets =
+    enabledModules.assets !== false && (isAdmin || isManager || effectivePermissions.canViewAssets)
+  const canSeeAdminWarranty =
+    enabledModules.warranty !== false && (isAdmin || isManager || effectivePermissions.canViewWarranty)
+  const canSeeAdminUsers =
+    enabledModules.users !== false && (isAdmin || effectivePermissions.canManageUsers)
+
+  // User Portal checks (phụ thuộc chặt chẽ vào Admin bật/tắt module & phân quyền):
+  const canSeeUserMyAssets =
+    enabledModules.assets !== false && effectivePermissions.canViewAssets !== false
+  const canUserDoInspection =
+    enabledModules.inspection !== false && effectivePermissions.canDoInspection === true
+  const canSeeUserReports =
+    enabledModules.reports !== false && effectivePermissions.canViewReports === true
+  const canSeeUserAllAssets =
+    enabledModules.assets !== false && (effectivePermissions.canEditAssets === true || (isManager && effectivePermissions.canViewAssets))
+  const canSeeUserWarranty =
+    enabledModules.warranty !== false && (effectivePermissions.canViewWarranty === true || effectivePermissions.canEditWarranty === true)
+  const canSeeUserManagement =
+    enabledModules.users !== false && effectivePermissions.canManageUsers === true
 
   return (
     <>
@@ -209,7 +230,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
               )}
 
               {/* Module 1: Daily Inspection & Checklist */}
-              {canSeeInspection && (
+              {canSeeAdminInspection && (
                 <button
                   onClick={() => handleItemClick('inspection', '/admin')}
                   className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-xs font-semibold transition-all group ${
@@ -251,7 +272,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
               )}
 
               {/* Module 2: Hologram Dashboard & Reports */}
-              {canSeeReports && (
+              {canSeeAdminReports && (
                 <button
                   onClick={() => handleItemClick('reports', '/admin')}
                   className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-xs font-semibold transition-all group ${
@@ -278,7 +299,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
               )}
 
               {/* Module 3: Asset Management & Depreciation */}
-              {canSeeAssets && (
+              {canSeeAdminAssets && (
                 <button
                   onClick={() => handleItemClick('assets', '/admin')}
                   className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-xs font-semibold transition-all group ${
@@ -313,7 +334,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
               )}
 
               {/* Module 4: Warranty Reminders */}
-              {canSeeWarranty && (
+              {canSeeAdminWarranty && (
                 <button
                   onClick={() => handleItemClick('warranty', '/admin')}
                   className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-xs font-semibold transition-all group ${
@@ -358,7 +379,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
               )}
 
               {/* Module 5: User Management & Permissions */}
-              {canSeeUsers && (
+              {canSeeAdminUsers && (
                 <button
                   onClick={() => handleItemClick('users', '/admin')}
                   className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-xs font-semibold transition-all group ${
@@ -439,97 +460,205 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
               )}
 
               {/* Item: My Assets */}
-              <button
-                onClick={() => handleItemClick('my-assets', '/user')}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-xs font-semibold transition-all group ${
-                  activeItem === 'my-assets'
-                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30 font-bold'
-                    : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
-                } ${isCollapsed ? 'justify-center px-0' : ''}`}
-                title="Tài sản của tôi"
-              >
-                <Laptop
-                  className={`w-4 h-4 shrink-0 transition-transform group-hover:scale-110 ${
-                    activeItem === 'my-assets' ? 'text-white' : 'text-blue-400'
-                  }`}
-                />
-                {!isCollapsed && (
-                  <div className="flex-1 flex items-center justify-between min-w-0">
-                    <span className="truncate">Tài sản của tôi</span>
-                    {typeof counts.myAssets === 'number' && (
-                      <span
-                        className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-bold ${
-                          activeItem === 'my-assets'
-                            ? 'bg-white/20 text-white'
-                            : 'bg-slate-800 text-slate-300'
-                        }`}
-                      >
-                        {counts.myAssets}
-                      </span>
-                    )}
-                  </div>
-                )}
-              </button>
-
-              {/* Item: Request Asset */}
-              <button
-                onClick={() => handleItemClick('request-modal')}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-xs font-semibold transition-all group text-slate-300 hover:bg-slate-800/80 hover:text-white ${
-                  isCollapsed ? 'justify-center px-0' : ''
-                }`}
-                title="Gửi đề xuất cấp phát thiết bị mới"
-              >
-                <PlusCircle className="w-4 h-4 shrink-0 text-emerald-400 transition-transform group-hover:scale-110" />
-                {!isCollapsed && <span className="truncate">Đề xuất cấp phát</span>}
-              </button>
-
-              {/* Item: Report Issue */}
-              <button
-                onClick={() => handleItemClick('report-modal')}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-xs font-semibold transition-all group text-slate-300 hover:bg-slate-800/80 hover:text-white ${
-                  isCollapsed ? 'justify-center px-0' : ''
-                }`}
-                title="Báo cáo sự cố hoặc hư hỏng"
-              >
-                <Wrench className="w-4 h-4 shrink-0 text-rose-400 transition-transform group-hover:scale-110" />
-                {!isCollapsed && <span className="truncate">Báo hỏng / Sự cố</span>}
-              </button>
-
-              {!isCollapsed && (
-                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 px-3 pt-3 mb-2 border-t border-slate-800/60">
-                  Nhiệm vụ & Thực thi
-                </p>
+              {canSeeUserMyAssets && (
+                <button
+                  onClick={() => handleItemClick('my-assets', '/user')}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-xs font-semibold transition-all group ${
+                    activeItem === 'my-assets'
+                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30 font-bold'
+                      : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                  } ${isCollapsed ? 'justify-center px-0' : ''}`}
+                  title="Tài sản của tôi"
+                >
+                  <Laptop
+                    className={`w-4 h-4 shrink-0 transition-transform group-hover:scale-110 ${
+                      activeItem === 'my-assets' ? 'text-white' : 'text-blue-400'
+                    }`}
+                  />
+                  {!isCollapsed && (
+                    <div className="flex-1 flex items-center justify-between min-w-0">
+                      <span className="truncate">Tài sản của tôi</span>
+                      {typeof counts.myAssets === 'number' && (
+                        <span
+                          className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-bold ${
+                            activeItem === 'my-assets'
+                              ? 'bg-white/20 text-white'
+                              : 'bg-slate-800 text-slate-300'
+                          }`}
+                        >
+                          {counts.myAssets}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </button>
               )}
 
-              {/* Item: User Daily Inspection Checklist */}
-              <button
-                onClick={() => handleItemClick('user-inspection', '/user')}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-xs font-semibold transition-all group ${
-                  activeItem === 'user-inspection'
-                    ? 'bg-sky-600 text-white shadow-lg shadow-sky-600/30 font-bold'
-                    : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
-                } ${isCollapsed ? 'justify-center px-0' : ''}`}
-                title="Thực hiện kiểm tra & chấm checklist thiết bị hàng ngày"
-              >
-                <CheckSquare
-                  className={`w-4 h-4 shrink-0 transition-transform group-hover:scale-110 ${
-                    activeItem === 'user-inspection' ? 'text-white' : 'text-sky-400'
+              {/* Item: Request Asset */}
+              {canSeeUserMyAssets && (
+                <button
+                  onClick={() => handleItemClick('request-modal')}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-xs font-semibold transition-all group text-slate-300 hover:bg-slate-800/80 hover:text-white ${
+                    isCollapsed ? 'justify-center px-0' : ''
                   }`}
-                />
-                {!isCollapsed && (
-                  <div className="flex-1 flex items-center justify-between min-w-0">
-                    <span className="truncate">Kiểm tra & Checklist</span>
-                    {typeof counts.inspectionUnchecked === 'number' && counts.inspectionUnchecked > 0 && (
-                      <span
-                        className="text-[10px] px-1.5 py-0.5 rounded-full font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30"
-                        title="Thiết bị cần kiểm tra hôm nay"
-                      >
-                        {counts.inspectionUnchecked} cần check
-                      </span>
+                  title="Gửi đề xuất cấp phát thiết bị mới"
+                >
+                  <PlusCircle className="w-4 h-4 shrink-0 text-emerald-400 transition-transform group-hover:scale-110" />
+                  {!isCollapsed && <span className="truncate">Đề xuất cấp phát</span>}
+                </button>
+              )}
+
+              {/* Item: Report Issue */}
+              {canSeeUserMyAssets && (
+                <button
+                  onClick={() => handleItemClick('report-modal')}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-xs font-semibold transition-all group text-slate-300 hover:bg-slate-800/80 hover:text-white ${
+                    isCollapsed ? 'justify-center px-0' : ''
+                  }`}
+                  title="Báo cáo sự cố hoặc hư hỏng"
+                >
+                  <Wrench className="w-4 h-4 shrink-0 text-rose-400 transition-transform group-hover:scale-110" />
+                  {!isCollapsed && <span className="truncate">Báo hỏng / Sự cố</span>}
+                </button>
+              )}
+
+              {/* Section: Inspection & Checklist Task for User */}
+              {canUserDoInspection && (
+                <>
+                  {!isCollapsed && (
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 px-3 pt-3 mb-2 border-t border-slate-800/60">
+                      Nhiệm vụ & Thực thi
+                    </p>
+                  )}
+
+                  <button
+                    onClick={() => handleItemClick('user-inspection', '/user')}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-xs font-semibold transition-all group ${
+                      activeItem === 'user-inspection'
+                        ? 'bg-sky-600 text-white shadow-lg shadow-sky-600/30 font-bold'
+                        : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                    } ${isCollapsed ? 'justify-center px-0' : ''}`}
+                    title="Thực hiện kiểm tra & chấm checklist thiết bị hàng ngày"
+                  >
+                    <CheckSquare
+                      className={`w-4 h-4 shrink-0 transition-transform group-hover:scale-110 ${
+                        activeItem === 'user-inspection' ? 'text-white' : 'text-sky-400'
+                      }`}
+                    />
+                    {!isCollapsed && (
+                      <div className="flex-1 flex items-center justify-between min-w-0">
+                        <span className="truncate">Kiểm tra & Checklist</span>
+                        {typeof counts.inspectionUnchecked === 'number' && counts.inspectionUnchecked > 0 && (
+                          <span
+                            className="text-[10px] px-1.5 py-0.5 rounded-full font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                            title="Thiết bị cần kiểm tra hôm nay"
+                          >
+                            {counts.inspectionUnchecked} cần check
+                          </span>
+                        )}
+                      </div>
                     )}
-                  </div>
-                )}
-              </button>
+                  </button>
+                </>
+              )}
+
+              {/* Section: Extra Authorized Modules enabled by Admin */}
+              {(canSeeUserReports || canSeeUserAllAssets || canSeeUserWarranty || canSeeUserManagement) && (
+                <>
+                  {!isCollapsed && (
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 px-3 pt-3 mb-2 border-t border-slate-800/60">
+                      Chức năng phân quyền
+                    </p>
+                  )}
+
+                  {/* Delegated: Reports */}
+                  {canSeeUserReports && (
+                    <button
+                      onClick={() => handleItemClick('reports', '/user')}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-xs font-semibold transition-all group ${
+                        activeItem === 'reports'
+                          ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/30 font-bold'
+                          : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                      } ${isCollapsed ? 'justify-center px-0' : ''}`}
+                      title="Xem Dashboard & Báo cáo phân tích"
+                    >
+                      <BarChart3
+                        className={`w-4 h-4 shrink-0 transition-transform group-hover:scale-110 ${
+                          activeItem === 'reports' ? 'text-white' : 'text-purple-400'
+                        }`}
+                      />
+                      {!isCollapsed && (
+                        <div className="flex-1 flex items-center justify-between min-w-0">
+                          <span className="truncate">Dashboard & Báo Cáo</span>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-bold border border-purple-500/30">
+                            Live
+                          </span>
+                        </div>
+                      )}
+                    </button>
+                  )}
+
+                  {/* Delegated: All Assets */}
+                  {canSeeUserAllAssets && (
+                    <button
+                      onClick={() => handleItemClick('assets', '/user')}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-xs font-semibold transition-all group ${
+                        activeItem === 'assets'
+                          ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 font-bold'
+                          : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                      } ${isCollapsed ? 'justify-center px-0' : ''}`}
+                      title="Danh mục tài sản toàn công ty"
+                    >
+                      <Laptop
+                        className={`w-4 h-4 shrink-0 transition-transform group-hover:scale-110 ${
+                          activeItem === 'assets' ? 'text-white' : 'text-indigo-400'
+                        }`}
+                      />
+                      {!isCollapsed && <span className="truncate">Danh Mục Tài Sản</span>}
+                    </button>
+                  )}
+
+                  {/* Delegated: Warranty */}
+                  {canSeeUserWarranty && (
+                    <button
+                      onClick={() => handleItemClick('warranty', '/user')}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-xs font-semibold transition-all group ${
+                        activeItem === 'warranty'
+                          ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/30 font-bold'
+                          : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                      } ${isCollapsed ? 'justify-center px-0' : ''}`}
+                      title="Quản lý và theo dõi phiếu bảo hành"
+                    >
+                      <AlertTriangle
+                        className={`w-4 h-4 shrink-0 transition-transform group-hover:scale-110 ${
+                          activeItem === 'warranty' ? 'text-white' : 'text-amber-400'
+                        }`}
+                      />
+                      {!isCollapsed && <span className="truncate">Nhắc Việc Bảo Hành</span>}
+                    </button>
+                  )}
+
+                  {/* Delegated: User Management */}
+                  {canSeeUserManagement && (
+                    <button
+                      onClick={() => handleItemClick('users', '/user')}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-xs font-semibold transition-all group ${
+                        activeItem === 'users'
+                          ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/30 font-bold'
+                          : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                      } ${isCollapsed ? 'justify-center px-0' : ''}`}
+                      title="Quản trị người dùng & phân quyền"
+                    >
+                      <Users
+                        className={`w-4 h-4 shrink-0 transition-transform group-hover:scale-110 ${
+                          activeItem === 'users' ? 'text-white' : 'text-emerald-400'
+                        }`}
+                      />
+                      {!isCollapsed && <span className="truncate">Quản Trị Người Dùng</span>}
+                    </button>
+                  )}
+                </>
+              )}
             </div>
           )}
 
